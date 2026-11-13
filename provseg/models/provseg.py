@@ -102,18 +102,20 @@ class DepGCN(nn.Module):
 
     @staticmethod
     def propagate(x, edges):
-        B, W, D = x.shape
-        flat = x.reshape(B * W, D)
         if edges is None or edges.numel() == 0:
             return x
-        b, i, j = edges[:, 0], edges[:, 1], edges[:, 2]
-        src = torch.cat([b * W + i, b * W + j])
-        dst = torch.cat([b * W + j, b * W + i])
-        deg = torch.ones(B * W, device=x.device, dtype=x.dtype).index_add_(
-            0, dst, torch.ones_like(dst, dtype=x.dtype))
-        norm = (deg[src] * deg[dst]).rsqrt().unsqueeze(-1)
-        out = flat / deg.unsqueeze(-1)                      # self loop term
-        out = out.index_add(0, dst, flat[src] * norm)
+        B, W, D = x.shape
+        # always propagate in float32: under bf16 autocast, rsqrt is promoted to fp32 and
+        # index_add would otherwise mix dtypes (and degree sums are more stable in fp32)
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            flat = x.float().reshape(B * W, D)
+            b, i, j = edges[:, 0], edges[:, 1], edges[:, 2]
+            src = torch.cat([b * W + i, b * W + j])
+            dst = torch.cat([b * W + j, b * W + i])
+            deg = torch.ones(B * W, device=x.device).index_add_(0, dst, torch.ones(len(dst), device=x.device))
+            norm = (deg[src] * deg[dst]).rsqrt().unsqueeze(-1)
+            out = flat / deg.unsqueeze(-1)                  # self loop term
+            out = out.index_add(0, dst, flat[src] * norm)
         return out.reshape(B, W, D)
 
     def forward(self, x, edges):
