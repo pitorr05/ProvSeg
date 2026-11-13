@@ -1,0 +1,16 @@
+torch>=2.3
+transformers>=4.44
+datasets
+huggingface_hub
+sentencepiece
+tiktoken
+accelerate
+numpy
+scipy
+pandas
+pyarrow
+scikit-learn
+matplotlib
+tqdm
+pytest
+spacy
