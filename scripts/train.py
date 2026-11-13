@@ -129,6 +129,9 @@ def main():
         feats = FeatureStore(npz, [FEAT_NAMES.index(f) for f in feat_names])
         train_recs = [r for r in train_recs if r["meta"]["uid"] in feats.arrs]
         dev_recs = [r for r in dev_recs if r["meta"]["uid"] in feats.arrs]
+        if not train_recs:
+            raise SystemExit(f"no features found in --feats {a.feats} for the training docs; "
+                             "run the feats stage first (or pass the right --feats dir)")
         feats.fit_norm([r["meta"]["uid"] for r in train_recs])
     use_syntax = not (a.no_syntax or a.blackbox)
     dep = load_dep(a.feats) if use_syntax else None

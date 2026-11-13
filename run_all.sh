@@ -52,7 +52,7 @@ fi
 
 if has train; then
   for s in $SEEDS; do
-    T="--train $TRAIN --eval $TEST --seed $s --out $RUNS $LIM $EP"
+    T="--train $TRAIN --eval $TEST --seed $s --out $RUNS --data $DATA --feats $FEATS $LIM $EP"
     python scripts/train.py --name provseg       --encoder $ENC --model efp $T            # ours (+ provseg_s*_records)
     python scripts/train.py --name seqxgpt_feats --encoder none --model blackbox $T       # SeqXGPT (EMNLP'23)
     python scripts/train.py --name pasted_cls    --encoder roberta-large --no_feats --no_crf --model blackbox $T  # PASTED (ACL-F'24)
