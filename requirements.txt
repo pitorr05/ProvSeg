@@ -14,3 +14,4 @@ matplotlib
 tqdm
 pytest
 spacy
+protobuf
