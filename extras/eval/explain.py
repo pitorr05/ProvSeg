@@ -11,7 +11,7 @@ E4 edit-trace       AUROC of predicted P(edited) vs gold ``edited`` on held-out 
 E5 ambiguity        AUROC of u for predicting errors; error rate per u-quintile
 cases               JSON + HTML of example spans with their evidence (case-study material)
 
-Usage: python -m provseg.eval.explain --run ../runs/provseg_s13 --data ../data/processed --out ../results
+Usage: python -m extras.eval.explain --run ../runs/provseg_s13 --data ../data/processed --out ../results
 """
 from __future__ import annotations
 

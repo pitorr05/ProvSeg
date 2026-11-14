@@ -10,7 +10,7 @@ from provseg.conformal.selective import SelectiveCalibrator  # noqa: E402
 from provseg.data.diff_provenance import chain, edit_ratio  # noqa: E402
 from provseg.data.schema import char_labels_to_words  # noqa: E402
 from provseg.eval.metrics import boundary_mae, span_f1  # noqa: E402
-from provseg.models.provseg import LinearChainCRF  # noqa: E402
+from extras.models.provseg import LinearChainCRF  # noqa: E402
 
 
 def test_chain_h_a_h():

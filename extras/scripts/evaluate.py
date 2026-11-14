@@ -24,7 +24,7 @@ import pandas as pd
 from scipy.ndimage import uniform_filter1d
 from sklearn.linear_model import LogisticRegression
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from provseg.conformal.selective import SelectiveCalibrator  # noqa: E402
 from provseg.data.torch_data import load_records  # noqa: E402
 from provseg.eval.metrics import all_metrics, risk_coverage, word_metrics  # noqa: E402

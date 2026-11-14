@@ -1,0 +1,121 @@
+"""Results table for the ladder (S0..S4) and the baselines, on the same test documents.
+
+For every benchmark, all runs are scored on the test documents they *all* predicted.
+Columns:
+  F1w     word-level macro-F1 (H vs AI)
+  AUROC   word-level AUROC of P(AI)
+  F1s     sentence-level macro-F1 (SeqXGPT protocol: majority label per sentence)
+  MAE     boundary MAE in words (SemEval-24 8C official metric; 8C only)
+  Cov@a   S3: share of words answered when "Unknown" is calibrated on the cal split so that the
+          word error rate among answered words is <= alpha with prob >= 1-delta (Learn-then-Test)
+  Risk@a  realised error rate on the answered test words (should be <= alpha)
+
+  python scripts/eval_ladder.py --runs ../runs_ladder/* --data ../data/processed --out ../results_ladder
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import pickle
+import sys
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from provseg.conformal.selective import SelectiveCalibrator  # noqa: E402
+from provseg.data.torch_data import load_records  # noqa: E402
+from provseg.eval.metrics import (boundary_mae, sentence_metrics, word_auroc,  # noqa: E402
+                                  word_metrics)
+
+ORDER = ["S0", "S1", "S2", "S4", "baseline"]
+PRETTY = {
+    "S0": "S0  SeqXGPT [EMNLP'23] (official, reproduced)",
+    "S1": "S1  + contrastive evidence (Fast-DetectGPT/Binoculars per word)",
+    "S2": "S2  + context encoder",
+    "S4": "S4  + evidence dropout = **ProvSeg (ours)**",
+    "seqroberta": "Seq-RoBERTa [SeqXGPT repo]",
+    "sentroberta": "Sent-RoBERTa [SeqXGPT repo]",
+    "fastdetect": "Fast-DetectGPT [ICLR'24] (sentence)",
+    "binoculars": "Binoculars [ICML'24] (sentence)",
+}
+
+
+def load_runs(patterns):
+    runs = {}
+    for pat in patterns:
+        for d in sorted(glob.glob(pat)):
+            for p in glob.glob(os.path.join(d, "pred_*.pkl")):
+                ds = os.path.basename(p)[5:-4]
+                dump = pickle.load(open(p, "rb"))
+                meta = dump.pop("__meta__")
+                if meta.get("step") == "repro":      # 6-way SeqXGPT reproduction: see its metrics_*.json
+                    continue
+                runs.setdefault(ds, []).append((meta, dump))
+    return runs
+
+
+def label(meta):
+    if meta.get("step") in PRETTY and meta["step"] != "baseline":
+        return PRETTY[meta["step"]]
+    return PRETTY.get(meta.get("arch"), meta.get("name"))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--runs", nargs="+", required=True)
+    ap.add_argument("--data", default="../data/processed")
+    ap.add_argument("--out", default="../results_ladder")
+    ap.add_argument("--alpha", type=float, default=0.05)
+    ap.add_argument("--delta", type=float, default=0.1)
+    a = ap.parse_args()
+    os.makedirs(a.out, exist_ok=True)
+    rows = []
+    for ds, runs in sorted(load_runs(a.runs).items()):
+        recs = {r["meta"]["uid"]: r for sp in ("cal", "test") for r in load_records([os.path.join(a.data, f"{ds}.jsonl")], {sp})}
+        test = set.intersection(*[{u for u, v in d.items() if v["split"] == "test"} for _, d in runs])
+        test = sorted(u for u in test if u in recs)
+        print(f"{ds}: {len(runs)} runs, {len(test)} common test docs")
+        for meta, d in runs:
+            g = [np.asarray(recs[u]["labels"]) for u in test]
+            p = [np.asarray(d[u]["pred"]) for u in test]
+            pr = [np.asarray(d[u]["prob"]) for u in test]
+            wm = word_metrics(g, p)
+            row = {"dataset": ds, "step": meta.get("step") or "baseline", "method": label(meta), "run": meta["name"],
+                   "n_docs": len(test), "F1w": wm["macro_f1"], "AUROC": word_auroc(g, pr),
+                   "F1s": sentence_metrics([recs[u]["words"] for u in test], g, p)["sent_f1"]}
+            if ds == "semeval8c":
+                row["MAE"] = boundary_mae(g, p)
+            cal = [u for u, v in d.items() if v["split"] == "cal" and u in recs]
+            if len(cal) >= 50:
+                c = SelectiveCalibrator(alpha=a.alpha, delta=a.delta).fit(
+                    [np.asarray(d[u]["pred"]) for u in cal], [np.asarray(d[u]["prob"]) for u in cal],
+                    [np.asarray(recs[u]["labels"]) for u in cal])
+                sel = word_metrics(g, [c.apply(x, y) for x, y in zip(p, pr)])
+                row[f"Cov@{a.alpha}"] = sel["coverage"]
+                row[f"Risk@{a.alpha}"] = sel.get("selective_risk", float("nan"))
+            rows.append(row)
+    df = pd.DataFrame(rows)
+    df["_o"] = df["step"].map(lambda s: ORDER.index(s) if s in ORDER else len(ORDER))
+    df = df.sort_values(["dataset", "_o", "method"]).drop(columns="_o")
+    df.to_csv(os.path.join(a.out, "ladder.csv"), index=False)
+    lines = ["# ProvSeg ladder (test split; same documents for every row of a benchmark)", ""]
+    for ds, g in df.groupby("dataset", sort=False):
+        cols = [c for c in ["F1w", "AUROC", "F1s", "MAE", f"Cov@{a.alpha}", f"Risk@{a.alpha}"] if c in g and g[c].notna().any()]
+        lines += [f"## {ds}  (n={int(g['n_docs'].iloc[0])} docs)", "",
+                  "| method | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
+        for _, r in g.iterrows():
+            vals = [("%.2f" % r[c]) if c == "MAE" else ("%.1f" % (100 * r[c])) if pd.notna(r[c]) else "-" for c in cols]
+            lines.append(f"| {r['method']} | " + " | ".join(vals) + " |")
+        lines.append("")
+    lines += [f"Cov@{a.alpha}: % words answered with certified error <= {a.alpha} (delta={a.delta}); "
+              "this is step S3 (+ certified Unknown), applied on top of each row's probabilities.", ""]
+    open(os.path.join(a.out, "table_ladder.md"), "w", encoding="utf8").write("\n".join(lines))
+    print("\n".join(lines))
+    json.dump({"alpha": a.alpha, "delta": a.delta}, open(os.path.join(a.out, "eval_config.json"), "w"))
+
+
+if __name__ == "__main__":
+    main()

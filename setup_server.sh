@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# One-time server setup: install deps, download public datasets, build word-level data and
-# dependency graphs. Run from the cloned ProvSeg/ directory:   bash setup_server.sh
-# Layout created next to the repo:  ../data/hf  ../data/processed  ../data/feats  (../refs for PROFILE=full)
+# One-time server setup: install deps, download public datasets, build word-level data.
+# Run from the cloned ProvSeg/ directory:   bash setup_server.sh
+# Layout created next to the repo:  ../data/hf  ../data/processed  ../data/feats  ../refs
 set -euo pipefail
 PROFILE=${PROFILE:-small}
 SKIP_PIP=${SKIP_PIP:-0}
@@ -9,7 +9,6 @@ cd "$(dirname "$0")"
 
 if [ "$SKIP_PIP" != 1 ]; then
   pip install -r requirements.txt
-  python -m spacy download en_core_web_sm
 fi
 mkdir -p ../data/hf ../data/processed ../data/feats
 
@@ -31,25 +30,24 @@ if full:
 print("datasets ok")
 PY
 
+mkdir -p ../refs
+# SeqXGPT-Bench ships with the official SeqXGPT repository (base paper of the ladder)
+[ -d ../refs/SeqXGPT ] || git clone --depth 1 https://github.com/Jihuai-wpy/SeqXGPT.git ../refs/SeqXGPT
 if [ "$PROFILE" = full ]; then
-  mkdir -p ../refs
-  [ -d ../refs/SeqXGPT ]  || git clone --depth 1 https://github.com/Jihuai-wpy/SeqXGPT.git ../refs/SeqXGPT
   [ -d ../refs/EditLens ] || git clone --depth 1 https://github.com/pangramlabs/EditLens.git ../refs/EditLens
   SETS=""
 else
-  SETS="--only semeval8c,pasted,beemo"
+  SETS="--only seqxgpt,semeval8c,beemo"
 fi
 
 echo "==> building word-level provenance data"
 python scripts/build_data.py --hf ../data/hf --refs ../refs --out ../data/processed $SETS
-echo "==> building dependency graphs (CPU)"
-python -m provseg.features.syntax_graph --data ../data/processed --out ../data/feats $SETS
 
 python -c "import torch; print('CUDA available:', torch.cuda.is_available(), '| GPUs:', torch.cuda.device_count())"
 cat <<'EOF'
 
 Setup done. Next:
-  LIMIT=50 bash run_all.sh            # ~15 min environment test (results in ../results_test)
-  bash run_all.sh                     # round 1: 3 benchmarks x 5 baselines + ProvSeg
-  cat ../results_small/table_main.md  # main table
+  LIMIT=50 bash scripts/run_ladder.sh      # environment test, ~30 min (results in ../results_ladder_test)
+  bash scripts/run_ladder.sh               # full ladder S0..S4 + baselines on 3 benchmarks
+  cat ../results_ladder/table_ladder.md
 EOF

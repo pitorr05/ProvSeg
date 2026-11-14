@@ -3,8 +3,8 @@ import sys
 
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from provseg.models.efp import EFProvSeg  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from extras.models.efp import EFProvSeg  # noqa: E402
 
 NAMES = ["ll_obs", "ent_obs", "ll_perf", "xent", "fdg_z", "log_rank", "rep"]
 

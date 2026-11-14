@@ -1,63 +1,56 @@
-# ProvSeg — word-level Human/AI provenance with certified abstention
+# ProvSeg: phát hiện từng từ do Người hay AI viết, đi lên từ SeqXGPT (EMNLP 2023)
 
-Thay vì một điểm "AI-score" toàn văn bản, ProvSeg gán nhãn **từng từ** H / A / **Unknown**.
-- **Where**: vùng nào là Human, vùng nào là AI.
-- **What survived**: phần nào còn lại sau khi chỉnh sửa (nhãn retained provenance tính qua diff phiên bản).
-- **Why**: đặc trưng bằng chứng theo từ (log-prob, entropy, Binoculars x-ppl, Fast-DetectGPT z, GLTR rank, RepreGuard rep-score).
-- **Unknown**: từ không đủ chắc chắn. Có bảo đảm rằng rủi ro chọn lọc (selective risk) ≤ α với xác suất ≥ 1−δ (Learn-then-Test).
+**Paper gốc (baseline chính): SeqXGPT** (Wang et al., EMNLP 2023). Đây là paper A* đầu tiên làm phát hiện AI ở mức câu/từ trong văn bản trộn Người+AI. Code chính thức được giữ **nguyên văn** trong `baselines/seqxgpt/official/` (Apache-2.0).
+
+ProvSeg cải tiến SeqXGPT **từng bước**. Mỗi bước chỉ thêm một thứ, và bảng kết quả chính là cái thang này:
+
+| Bước | Thêm gì | Giải quyết điểm yếu nào của SeqXGPT |
+|---|---|---|
+| **S0** | SeqXGPT gốc: 4 LLM log-prob (GPT-2-xl, GPT-Neo-2.7B, GPT-J-6B, LLaMA-7B), CNN, Transformer, BMES-Viterbi | (tái lập) |
+| **S1** | Bằng chứng *tương phản* theo từ: Fast-DetectGPT z, Binoculars x-entropy, entropy, rank (cặp Qwen2.5-1.5B) | log-prob tuyệt đối là "điểm số không ý nghĩa" |
+| **S2** | Ngữ cảnh ngữ nghĩa: DeBERTa-v3-large ghép vào backbone | không hiểu nội dung, yếu khi AI bị người sửa |
+| **S3** | "Unknown" có bảo đảm: lỗi ≤ α với xác suất ≥ 1−δ (Learn-then-Test) | luôn bị ép trả lời H/A |
+| **S4** | Evidence dropout + Shapley chính xác theo từng nguồn bằng chứng = **ProvSeg** | không giải thích được "vì sao từ này là AI" |
 
 ## Cấu trúc
 ```
-provseg/data/schema.py            Record thống nhất (nhãn theo từ, split theo doc_id)
-provseg/data/diff_provenance.py   lan truyền nhãn qua chuỗi phiên bản H→A→H
-provseg/data/loaders/             seqxgpt, semeval8c, pasted, beemo, apt_eval, editlens
-provseg/features/token_features.py  đặc trưng theo từ từ cặp observer/performer LLM + hướng RepreGuard
-provseg/models/provseg.py         encoder + đặc trưng + CRF (marginals cho abstention)
-provseg/conformal/selective.py    Learn-then-Test (Hoeffding–Bentkus) → Unknown
-provseg/eval/metrics.py           word/span F1, boundary MAE, ratio MAE, AURC, ECE
-scripts/build_data.py | train.py | evaluate.py | plots.py
-run_all.sh                        toàn bộ pipeline trên GPU
-tests/test_core.py                diff chain, CRF (so với brute-force), calibrator, metrics
+baselines/seqxgpt/official/   code gốc SeqXGPT, Seq-RoBERTa, Sent-RoBERTa (không sửa)
+baselines/zeroshot/           hàm chấm điểm gốc của Fast-DetectGPT và Binoculars (copy nguyên văn)
+baselines/compat/             thay thế fastNLP (chỉ phần Viterbi BMES), chỉ dùng khi chưa cài fastNLP
+provseg/models/seqx.py        SeqXNet = SeqXGPT tổng quát hoá (test: cho logits giống hệt bản gốc) + S1/S2/S4
+provseg/features/llm_logprob.py    đặc trưng S0 (như gen_features.py của SeqXGPT, gọi HF trực tiếp)
+provseg/features/token_features.py đặc trưng S1 (bằng chứng tương phản)
+provseg/conformal/selective.py     S3 (Learn-then-Test)
+scripts/train_seq.py          một trainer cho S0–S4 và các baseline có giám sát
+scripts/zeroshot_sent.py      Fast-DetectGPT / Binoculars ở mức câu
+scripts/eval_ladder.py        bảng kết quả (cùng tập test cho mọi dòng)
+scripts/explain_s4.py         giải thích theo bằng chứng (Shapley) và các ví dụ HTML
+scripts/run_ladder.sh         chạy toàn bộ
+scripts/motivation.py         phân tích motivation M1/M2 (EditLens, APT, Beemo)
+extras/                       bản v1 (EFP, GCN cú pháp, RepreGuard, ...): lưu lại, không chạy mặc định
 ```
 
-## Dữ liệu (đều công khai, không tự sinh)
-| Bộ | Vai trò | Nhãn từ |
-|---|---|---|
-| SeqXGPT-Bench (`refs/SeqXGPT`) | train/test | human prefix + AI continuation |
-| SemEval-24 8C (`d0rj/SemEval2024-task8`) | train/test | boundary |
-| Beemo (`toloka/beemo`) | train/test, records | AI output → expert human edit (diff) |
-| PASTED (`linzw/PASTED`) | test (+OOD) | câu bị AI paraphrase |
-| APT-Eval (`smksaha/apt-eval`) | test theo mức polish | human → LLM polish (diff) |
-| EditLens (`refs/EditLens/data`, CC BY-NC-SA) | test | human → AI edit (diff) |
+## Benchmark (huấn luyện và kiểm tra trong cùng benchmark) và metric
+- **SeqXGPT-Bench**: sân nhà của paper gốc.
+- **SemEval-24 Task 8C**: Người viết rồi AI viết tiếp. Metric chính thức là boundary MAE.
+- **Beemo**: AI viết, chuyên gia sửa lại.
 
-## Chạy trên server (GPU)
+Metric: word macro-F1, word AUROC, sentence macro-F1 (giao thức của SeqXGPT), boundary MAE, Cov@0.05.
+
+## Chạy trên server
 ```bash
-mkdir -p ~/work && cd ~/work
-git clone https://github.com/pitorr05/ProvSeg.git && cd ProvSeg
-bash setup_server.sh                 # cài thư viện, tải dữ liệu HF, build dữ liệu + graph cú pháp (~30–40 phút CPU)
-LIMIT=50 bash run_all.sh             # chạy thử ~15 phút để kiểm tra môi trường
-bash run_all.sh                      # vòng 1 đầy đủ
-cat ../results_small/table_main.md
+cd /data/ProvSeg && git pull
+bash setup_server.sh                          # (lần đầu) cài đặt, tải dữ liệu, clone SeqXGPT-Bench
+LIMIT=50 bash scripts/run_ladder.sh           # chạy thử toàn bộ với 50 tài liệu/split
+bash scripts/run_ladder.sh                    # chạy thật
+cat ../results_ladder/table_ladder.md
 ```
+Chạy riêng từng phần: `STEPS="feats S0" bash scripts/run_ladder.sh`. Các giá trị STEPS: `feats S0 S1 S2 S4 baselines repro eval`.
 
-## Vòng 1 (mặc định): chỉ chạy ProvSeg trên 3 benchmark
-```bash
-bash run_all.sh                     # PROFILE=small, 1 seed: ProvSeg + ProvSeg (+records)
-cat ../results_small/table_main.md  # bảng kết quả
-```
-- Benchmark: SemEval-24 8C (H→A, boundary MAE), PASTED (AI paraphrase), Beemo (người sửa văn bản AI).
-- Metric: word macro-F1, word AUROC, boundary MAE (8C), Cov@0.05 (certified).
-- Baseline (Fast-DetectGPT, Binoculars, RepreGuard, SeqXGPT, PASTED) sẽ chạy riêng bằng **repo gốc** của từng paper ở bước sau, không nằm trong script này.
-- Vòng 2: `PROFILE=full bash run_all.sh`, thêm APT-Eval/EditLens/PASTED-OOD và các ablation.
+**Mốc an toàn:** `repro` huấn luyện SeqXGPT 6 lớp trên SeqXGPT-Bench. Giá trị `multiclass_sent_f1` phải gần với số trong paper SeqXGPT, nếu không thì chưa cải tiến tiếp.
 
-## Chạy (đầy đủ)
-```bash
-pip install -r requirements.txt
-python -m pytest -q tests                          # kiểm tra lõi (CPU)
-bash run_all.sh                                     # GPU: data → features → train → eval → figs
-OBS=tiiuae/falcon-7b PERF=tiiuae/falcon-7b-instruct bash run_all.sh   # cặp LLM gốc của Binoculars
-```
-Ước lượng trên 1×A100 80GB: đặc trưng mất khoảng 6–10 giờ cho khoảng 170k tài liệu. Mỗi lần train DeBERTa-v3-large mất khoảng 2–3 giờ. Nên chạy `provseg`, `seqroberta` và `abl_nofeat` với 1 seed trước (go/no-go), sau đó mới chạy đủ 3 seed và toàn bộ ablation.
-
-## Baseline (dấu * nghĩa là chuyển từ document-level sang mức từ bằng cửa sổ trượt; được ghi rõ trong bài)
-Binoculars*, Fast-DetectGPT*, Log-likelihood*, RepreGuard* (`evaluate.py`), Seq-RoBERTa (CRF, như trong SeqXGPT), SeqXGPT-style trên đặc trưng của chúng ta (`--encoder none`). EditLens có điểm số document-level sẵn trong CSV và được đưa vào phân tích ratio-MAE.
+## Khác biệt có chủ đích so với code gốc (đều ghi trong paper)
+- Đặc trưng S0 tính bằng HF trực tiếp, không qua server HTTP. Trung bình được tính theo ký tự thay vì theo byte, kết quả như nhau với văn bản ASCII.
+- Đặc trưng được chuẩn hoá z-score theo tập train. Giữ checkpoint có dev F1 tốt nhất.
+- Không tính đơn vị khoảng trắng: mỗi từ cách nhau bởi khoảng trắng là một bước của chuỗi.
+- Seq-RoBERTa giải mã Viterbi trên các từ (lấy sub-token đầu của mỗi từ).

@@ -27,12 +27,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from provseg.data.torch_data import FeatureStore, WindowDataset, load_dep, load_records  # noqa: E402
 from provseg.eval.metrics import all_metrics  # noqa: E402
 from provseg.features.token_features import FEAT_NAMES  # noqa: E402
-from provseg.models.efp import EFProvSeg  # noqa: E402
-from provseg.models.provseg import ProvSeg  # noqa: E402
+from extras.models.efp import EFProvSeg  # noqa: E402
+from extras.models.provseg import ProvSeg  # noqa: E402
 
 EVAL_SETS = ["seqxgpt", "semeval8c", "beemo", "pasted", "pasted_ood", "apt_eval", "editlens"]
 

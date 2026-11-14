@@ -8,7 +8,7 @@ GCN can propagate evidence *per word* instead of mean-pooling the document.
 Output: <out>/<dataset>_dep.npz with one int32 array (E, 2) of undirected word
 edges (i < j, deduplicated, no self loops) per record uid.
 
-Usage: python -m provseg.features.syntax_graph --data ../data/processed --out ../data/feats [--only ds1,ds2]
+Usage: python -m extras.features.syntax_graph --data ../data/processed --out ../data/feats [--only ds1,ds2]
 """
 from __future__ import annotations
 

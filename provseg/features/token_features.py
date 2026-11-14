@@ -163,18 +163,8 @@ def main():
         if a.rep_dir_cache:
             torch.save(fx.rep_dirs, a.rep_dir_cache)
 
-    from provseg.data.torch_data import cap_subset
-    keep = set(a.splits.split(",")) if a.splits else None
-    caps = dict((k, int(v)) for k, v in (x.split(":") for x in a.cap.split(",") if x)) if a.cap else {}
-    by_split = {}
-    with open(a.records, encoding="utf8") as f:
-        for line in f:
-            r = json.loads(line)
-            if keep and r["split"] not in keep:
-                continue
-            by_split.setdefault(r["split"], []).append(r)
-    # --limit is per split and in file order, exactly like train.py's load_records(limit=...)
-    todo = [r for s, rs in by_split.items() for r in (rs[: a.limit] if a.limit else cap_subset(rs, caps.get(s, 0)))]
+    from provseg.data.torch_data import select_records
+    todo = select_records(a.records, a.splits, a.limit, a.cap)
     feats = {}
     for r in tqdm(todo, desc="features", mininterval=60):
         feats[r["meta"]["uid"]] = fx.word_features(r["words"])

@@ -43,6 +43,21 @@ def load_records(paths, splits=None, limit=0, cap=0, seed=0):
     return out
 
 
+def select_records(path, splits="", limit=0, cap="train:25000,dev:2500"):
+    """Documents to featurise: optional split filter; ``limit`` = first N per split in file order
+    (exactly what ``load_records(limit=N)`` returns), otherwise the uid-hash ``cap`` per split."""
+    keep = set(splits.split(",")) if splits else None
+    caps = dict((k, int(v)) for k, v in (x.split(":") for x in cap.split(",") if x)) if cap else {}
+    by_split = {}
+    with open(path, encoding="utf8") as f:
+        for line in f:
+            r = json.loads(line)
+            if keep and r["split"] not in keep:
+                continue
+            by_split.setdefault(r["split"], []).append(r)
+    return [r for s, rs in by_split.items() for r in (rs[:limit] if limit else cap_subset(rs, caps.get(s, 0)))]
+
+
 class FeatureStore:
     """uid -> (n_words, F) array from .npz files, z-normalised with train stats (NaN -> train mean)."""
 

@@ -143,3 +143,43 @@ def all_metrics(golds, preds, probs=None) -> dict:
         m["ece"] = ece(golds, [np.asarray(pr)[:, 1] for pr in probs])
         m["auroc"] = word_auroc(golds, probs)
     return m
+
+
+_END = (".", "!", "?")
+
+
+def sentence_spans(words):
+    """Rule-based sentence split over whitespace words: a sentence ends at a word whose text,
+    stripped of closing quotes/brackets, ends with . ! or ?  Returns [(start, end)] half-open."""
+    out, s = [], 0
+    for i, w in enumerate(words):
+        if w.rstrip("\"')]}”’").endswith(_END):
+            out.append((s, i + 1))
+            s = i + 1
+    if s < len(words):
+        out.append((s, len(words)))
+    return out
+
+
+def _majority(x):
+    v, c = np.unique(x, return_counts=True)
+    return int(v[np.argmax(c)])
+
+
+def sentence_metrics(words_list, golds, preds) -> dict:
+    """SeqXGPT's sentence-level protocol: each sentence takes the majority word label (gold and
+    predicted separately); report accuracy and macro-F1 over sentences."""
+    g_all, p_all = [], []
+    for ws, g, p in zip(words_list, golds, preds):
+        g, p = np.asarray(g), np.asarray(p)
+        for a, b in sentence_spans(ws[: len(g)]):
+            m = g[a:b] >= 0
+            if not m.any():
+                continue
+            g_all.append(_majority(g[a:b][m]))
+            p_all.append(_majority(p[a:b][m]))
+    if not g_all:
+        return {"sent_acc": float("nan"), "sent_f1": float("nan")}
+    g_all, p_all = np.array(g_all), np.array(p_all)
+    return {"sent_acc": float((g_all == p_all).mean()),
+            "sent_f1": float(f1_score(g_all, p_all, average="macro", labels=sorted(set(g_all.tolist()))))}

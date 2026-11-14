@@ -4,9 +4,9 @@ import sys
 import numpy as np
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from provseg.data.diff_provenance import chain_edits  # noqa: E402
-from provseg.models.provseg import DepGCN, ProvSeg  # noqa: E402
+from extras.models.provseg import DepGCN, ProvSeg  # noqa: E402
 
 
 def test_chain_edits():

@@ -37,7 +37,7 @@ else
 fi
 
 has data   && python scripts/build_data.py --hf ../data/hf --refs ../refs --out $DATA
-has syntax && python -m provseg.features.syntax_graph --data $DATA --out $FEATS
+has syntax && python -m extras.features.syntax_graph --data $DATA --out $FEATS
 
 # per-word LLM evidence (GPU, dominant cost). Train/dev are capped with the same uid-hash
 # subset that train.py uses, so every model sees exactly the same documents.
@@ -67,7 +67,7 @@ fi
 if has eval; then
   python scripts/evaluate.py --runs $RUNS/*_s* --data $DATA --feats $FEATS --train_sets $TRAIN \
       --test_sets $TEST --no_zs --out $RES
-  python -m provseg.eval.explain --run $RUNS/provseg_s* --data $DATA --out $RES
+  python -m extras.eval.explain --run $RUNS/provseg_s* --data $DATA --out $RES
   if [ "$PROFILE" = full ]; then
     python scripts/motivation.py --data $DATA --out $RES --figs paper/figs
     python scripts/plots.py --res $RES --out paper/figs
