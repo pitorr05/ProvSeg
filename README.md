@@ -12,42 +12,48 @@ ProvSeg cải tiến SeqXGPT **từng bước**. Mỗi bước chỉ thêm một
 | **S3** | "Unknown" có bảo đảm: lỗi ≤ α với xác suất ≥ 1−δ (Learn-then-Test) | luôn bị ép trả lời H/A |
 | **S4** | Evidence dropout + Shapley chính xác theo từng nguồn bằng chứng = **ProvSeg** | không giải thích được "vì sao từ này là AI" |
 
-## Cấu trúc
+## Cấu trúc repo
 ```
-baselines/seqxgpt/official/   code gốc SeqXGPT, Seq-RoBERTa, Sent-RoBERTa (không sửa)
-baselines/zeroshot/           hàm chấm điểm gốc của Fast-DetectGPT và Binoculars (copy nguyên văn)
-baselines/compat/             thay thế fastNLP (chỉ phần Viterbi BMES), chỉ dùng khi chưa cài fastNLP
-provseg/models/seqx.py        SeqXNet = SeqXGPT tổng quát hoá (test: cho logits giống hệt bản gốc) + S1/S2/S4
-provseg/features/llm_logprob.py    đặc trưng S0 (như gen_features.py của SeqXGPT, gọi HF trực tiếp)
-provseg/features/token_features.py đặc trưng S1 (bằng chứng tương phản)
-provseg/conformal/selective.py     S3 (Learn-then-Test)
-scripts/train_seq.py          một trainer cho S0–S4 và các baseline có giám sát
-scripts/zeroshot_sent.py      Fast-DetectGPT / Binoculars ở mức câu
-scripts/eval_ladder.py        bảng kết quả (cùng tập test cho mọi dòng)
-scripts/explain_s4.py         giải thích theo bằng chứng (Shapley) và các ví dụ HTML
-scripts/run_ladder.sh         chạy toàn bộ
-scripts/motivation.py         phân tích motivation M1/M2 (EditLens, APT, Beemo)
-extras/                       bản v1 (EFP, GCN cú pháp, RepreGuard, ...): lưu lại, không chạy mặc định
+ProvSeg/
+├── run_seqxgpt.sh            LƯỢT 1: chạy lại SeqXGPT gốc  -> ../runs/seqxgpt/,  ../results/seqxgpt/
+├── run_provseg.sh            LƯỢT 2: cải tiến S1–S4 của mình -> ../runs/provseg/, ../results/provseg/
+│                                     + bảng so sánh SeqXGPT vs ProvSeg -> ../results/compare/
+├── run_baselines.sh          (để sau) Seq/Sent-RoBERTa, Fast-DetectGPT, Binoculars -> ../runs/baselines/
+├── setup_server.sh           cài đặt + tải dữ liệu (chạy 1 lần)
+│
+├── baselines/                CODE CỦA NGƯỜI KHÁC (nguyên văn, giữ license)
+│   ├── seqxgpt/official/     SeqXGPT, Seq-RoBERTa, Sent-RoBERTa (repo chính thức SeqXGPT)
+│   ├── zeroshot/             hàm chấm điểm gốc của Fast-DetectGPT, Binoculars
+│   └── compat/               thay thế fastNLP (chỉ Viterbi BMES)
+│
+├── provseg/                  CODE CỦA MÌNH
+│   ├── data/                 đọc 7 bộ dữ liệu → nhãn H/AI theo từng từ, chia train/dev/cal/test
+│   ├── features/llm_logprob.py     đặc trưng của SeqXGPT (lượt 1)
+│   ├── features/token_features.py  bằng chứng tương phản (lượt 2, S1)
+│   ├── models/seqx.py        SeqXNet: kiến trúc SeqXGPT + S1/S2/S4
+│   ├── conformal/selective.py      Unknown có bảo đảm (S3)
+│   └── eval/metrics.py       metric mức từ / câu / boundary
+│
+├── scripts/                  train_seq.py (train mọi mô hình), eval_ladder.py (bảng), explain_s4.py (giải thích),
+│                             zeroshot_sent.py, build_data.py, motivation.py, _env.sh (cấu hình chung)
+├── tests/                    kiểm tra (gồm: SeqXNet cho kết quả y hệt SeqXGPT gốc)
+├── paper/                    bản thảo LaTeX
+└── extras/                   bản v1 cũ (EFP, GCN cú pháp, RepreGuard), lưu lại, không chạy
 ```
-
-## Benchmark (huấn luyện và kiểm tra trong cùng benchmark) và metric
-- **SeqXGPT-Bench**: sân nhà của paper gốc.
-- **SemEval-24 Task 8C**: Người viết rồi AI viết tiếp. Metric chính thức là boundary MAE.
-- **Beemo**: AI viết, chuyên gia sửa lại.
-
-Metric: word macro-F1, word AUROC, sentence macro-F1 (giao thức của SeqXGPT), boundary MAE, Cov@0.05.
 
 ## Chạy trên server
 ```bash
 cd /data/ProvSeg && git pull
-bash setup_server.sh                          # (lần đầu) cài đặt, tải dữ liệu, clone SeqXGPT-Bench
-LIMIT=50 bash scripts/run_ladder.sh           # chạy thử toàn bộ với 50 tài liệu/split
-bash scripts/run_ladder.sh                    # chạy thật
-cat ../results_ladder/table_ladder.md
-```
-Chạy riêng từng phần: `STEPS="feats S0" bash scripts/run_ladder.sh`. Các giá trị STEPS: `feats S0 S1 S2 S4 baselines repro eval`.
+SKIP_PIP=1 bash setup_server.sh      # (1 lần) clone SeqXGPT-Bench, build dữ liệu seqxgpt/semeval8c/beemo
 
-**Mốc an toàn:** `repro` huấn luyện SeqXGPT 6 lớp trên SeqXGPT-Bench. Giá trị `multiclass_sent_f1` phải gần với số trong paper SeqXGPT, nếu không thì chưa cải tiến tiếp.
+LIMIT=50 bash run_seqxgpt.sh         # thử nhanh lượt 1 (kết quả trong ../results_test/)
+LIMIT=50 bash run_provseg.sh         # thử nhanh lượt 2
+
+bash run_seqxgpt.sh                  # LƯỢT 1 thật: SeqXGPT gốc
+bash run_provseg.sh                  # LƯỢT 2 thật: cải tiến của mình
+cat ../results/compare/table_ladder.md   # SeqXGPT vs S1, S2, S4 trên cùng tài liệu test
+```
+**Mốc an toàn:** `../results/seqxgpt/repro_6way_*.json`, trường `multiclass_sent_f1` phải gần số trong paper SeqXGPT.
 
 ## Khác biệt có chủ đích so với code gốc (đều ghi trong paper)
 - Đặc trưng S0 tính bằng HF trực tiếp, không qua server HTTP. Trung bình được tính theo ký tự thay vì theo byte, kết quả như nhau với văn bản ASCII.

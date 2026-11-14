@@ -47,7 +47,8 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available(), '| 
 cat <<'EOF'
 
 Setup done. Next:
-  LIMIT=50 bash scripts/run_ladder.sh      # environment test, ~30 min (results in ../results_ladder_test)
-  bash scripts/run_ladder.sh               # full ladder S0..S4 + baselines on 3 benchmarks
-  cat ../results_ladder/table_ladder.md
+  LIMIT=50 bash run_seqxgpt.sh && LIMIT=50 bash run_provseg.sh   # quick test (../results_test/)
+  bash run_seqxgpt.sh                      # run 1: official SeqXGPT     -> ../results/seqxgpt/
+  bash run_provseg.sh                      # run 2: ProvSeg S1..S4       -> ../results/provseg/, ../results/compare/
+  cat ../results/compare/table_ladder.md
 EOF

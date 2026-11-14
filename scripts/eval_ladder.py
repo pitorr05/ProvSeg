@@ -97,6 +97,9 @@ def main():
                 row[f"Cov@{a.alpha}"] = sel["coverage"]
                 row[f"Risk@{a.alpha}"] = sel.get("selective_risk", float("nan"))
             rows.append(row)
+    if not rows:
+        print("no runs found for", a.runs)
+        return
     df = pd.DataFrame(rows)
     df["_o"] = df["step"].map(lambda s: ORDER.index(s) if s in ORDER else len(ORDER))
     df = df.sort_values(["dataset", "_o", "method"]).drop(columns="_o")
