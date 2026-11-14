@@ -40,15 +40,14 @@ bash run_all.sh                      # vòng 1 đầy đủ
 cat ../results_small/table_main.md
 ```
 
-## Vòng 1 (mặc định): 3 benchmark × 5 baseline
+## Vòng 1 (mặc định): chỉ chạy ProvSeg trên 3 benchmark
 ```bash
-cd ProvSeg && pip install -r requirements.txt
-bash run_all.sh                     # PROFILE=small, 1 seed; dữ liệu + graph cú pháp đã có sẵn
-cat ../results_small/table_main.md  # bảng chính
+bash run_all.sh                     # PROFILE=small, 1 seed: ProvSeg + ProvSeg (+records)
+cat ../results_small/table_main.md  # bảng kết quả
 ```
 - Benchmark: SemEval-24 8C (H→A, boundary MAE), PASTED (AI paraphrase), Beemo (người sửa văn bản AI).
-- Baseline: Fast-DetectGPT (ICLR'24), Binoculars (ICML'24), RepreGuard (TACL'25), SeqXGPT (EMNLP'23), PASTED (ACL-F'24).
 - Metric: word macro-F1, word AUROC, boundary MAE (8C), Cov@0.05 (certified).
+- Baseline (Fast-DetectGPT, Binoculars, RepreGuard, SeqXGPT, PASTED) sẽ chạy riêng bằng **repo gốc** của từng paper ở bước sau, không nằm trong script này.
 - Vòng 2: `PROFILE=full bash run_all.sh`, thêm APT-Eval/EditLens/PASTED-OOD và các ablation.
 
 ## Chạy (đầy đủ)

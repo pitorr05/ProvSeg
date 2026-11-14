@@ -107,3 +107,12 @@ def test_cap_subset_deterministic_and_nested():
     b = cap_subset(list(reversed(recs)), 30)
     assert len(a) == 30 and {r["meta"]["uid"] for r in a} == {r["meta"]["uid"] for r in b}
     assert {r["meta"]["uid"] for r in cap_subset(recs, 10)} <= {r["meta"]["uid"] for r in a}
+
+
+def test_featurestore_handles_inf_and_nan(tmp_path):
+    from provseg.data.torch_data import FeatureStore
+    a = np.array([[1.0, np.inf], [np.nan, 2.0], [3.0, -np.inf], [1e30, 4.0]], dtype=np.float32)
+    np.savez(tmp_path / "f.npz", **{"d:0": a})
+    fs = FeatureStore([str(tmp_path / "f.npz")]).fit_norm(["d:0"])
+    x = fs.get("d:0", 4)
+    assert np.isfinite(x).all() and np.abs(x).max() <= 10

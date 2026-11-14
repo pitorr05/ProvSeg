@@ -67,6 +67,8 @@ def stitch(chunks, n):
                 res[k] = np.zeros((n,) + v.shape[1:], dtype=np.float32)
             L = min(len(v), n - s)
             res[k][s:s + L] = v[:L]
+    nonfinite = ~np.isfinite(res["prob"]).all(-1)
+    res["prob"][nonfinite] = 0.5                         # undecidable -> maximal uncertainty
     bad = res["pred"] < 0
     res["pred"][bad] = res["prob"][bad].argmax(-1)
     if "edit_logit" in res:
@@ -166,19 +168,31 @@ def main():
     best, log = -1.0, []
     for ep in range(a.epochs):
         model.train()
-        t0, tot, parts = time.time(), 0.0, {}
+        t0, tot, parts, skipped = time.time(), 0.0, {}, 0
         for batch in tqdm(tl, desc=f"ep{ep}", mininterval=30):
             b = {k: v.to(device) for k, v in batch.items()}
             with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=amp):
                 o = model(b, lam_edit=a.lam_edit, lam_amb=a.lam_amb, lam_fac=a.lam_fac)
+            if not torch.isfinite(o["loss"]):
+                skipped += 1                       # never let one bad batch poison the weights
+                if skipped <= 3:
+                    print(f"[warn] non-finite loss, batch skipped: { {k: float(v) for k, v in o['logs'].items()} }")
+                opt.zero_grad(set_to_none=True)
+                continue
             o["loss"].backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if not torch.isfinite(gn):
+                skipped += 1
+                opt.zero_grad(set_to_none=True)
+                continue
             opt.step()
             sch.step()
             opt.zero_grad(set_to_none=True)
             tot += o["loss"].item()
             for k, v in o["logs"].items():
                 parts[k] = parts.get(k, 0.0) + float(v)
+        if skipped:
+            print(f"[warn] epoch {ep}: skipped {skipped}/{len(tl)} batches with non-finite loss/grad")
         preds = run_predict(model, dl, device, amp)
         G, P, PR = [], [], []
         for ri, r in enumerate(dev_recs):
@@ -186,8 +200,11 @@ def main():
             G.append(np.array(r["labels"]))
             P.append(res["pred"])
             PR.append(res["prob"])
+        n_bad = sum(int((~np.isfinite(pr)).any()) for pr in PR)
+        if n_bad:
+            print(f"[warn] {n_bad}/{len(PR)} dev docs have non-finite probabilities (set to 0.5)")
         m = all_metrics(G, P, PR)
-        log.append({"epoch": ep, "train_loss": tot / max(len(tl), 1),
+        log.append({"epoch": ep, "train_loss": tot / max(len(tl) - skipped, 1), "skipped_batches": skipped,
                     **{f"loss_{k}": v / max(len(tl), 1) for k, v in parts.items()},
                     "time": time.time() - t0, **m})
         if a.model == "additive":
@@ -202,7 +219,8 @@ def main():
     for ds in a.eval.split(","):
         if not os.path.exists(path(ds)):
             continue
-        recs = load_records([path(ds)], {"dev", "cal", "test"}, a.limit)
+        # --limit applies per split (same as feature extraction), so test docs are always included
+        recs = [r for sp in ("dev", "cal", "test") for r in load_records([path(ds)], {sp}, a.limit)]
         if feats is not None:
             recs = [r for r in recs if r["meta"]["uid"] in feats.arrs]
         if not recs:

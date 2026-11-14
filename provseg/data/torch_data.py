@@ -55,19 +55,26 @@ class FeatureStore:
         self.feat_idx = feat_idx
         self.mu = self.sd = None
 
+    @staticmethod
+    def _finite(a):
+        a = np.asarray(a, dtype=np.float64)
+        return np.where(np.isfinite(a), a, np.nan)      # inf (e.g. bf16 overflow) -> treated as missing
+
     def fit_norm(self, uids):
         X = np.concatenate([self.arrs[u] for u in uids if u in self.arrs])
-        X = X[:, self.feat_idx] if self.feat_idx is not None else X
-        self.mu, self.sd = np.nanmean(X, 0), np.nanstd(X, 0) + 1e-6
+        X = self._finite(X[:, self.feat_idx] if self.feat_idx is not None else X)
+        self.mu = np.nan_to_num(np.nanmean(X, 0), nan=0.0)
+        self.sd = np.nan_to_num(np.nanstd(X, 0), nan=1.0) + 1e-6
         return self
 
     def get(self, uid, n_words):
         a = self.arrs.get(uid)
         if a is None or len(a) != n_words:
             raise KeyError(f"features missing/misaligned for {uid}")
-        a = a[:, self.feat_idx] if self.feat_idx is not None else a
+        a = self._finite(a[:, self.feat_idx] if self.feat_idx is not None else a)
         a = (a - self.mu) / self.sd
-        return np.nan_to_num(a, nan=0.0).astype(np.float32)
+        # missing -> train mean (0); clip outliers so a single extreme token cannot blow up training
+        return np.clip(np.nan_to_num(a, nan=0.0), -10, 10).astype(np.float32)
 
 
 def load_dep(feat_dir):

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ProvSeg pipeline (GPU server). Run from ProvSeg/:  bash run_all.sh
 #
-# PROFILE=small (default)  first round: 3 benchmarks x 5 baselines + ProvSeg (+records)
-#   benchmarks : SemEval-24 8C (H->A boundary), PASTED (AI paraphrase of human text), Beemo (human edits of AI text)
-#   baselines  : Fast-DetectGPT, Binoculars, RepreGuard (zero-shot, adapted to words), SeqXGPT, PASTED (trained)
-# PROFILE=full             all 7 datasets, ablations, extra baselines (second round)
+# PROFILE=small (default)  round 1: ProvSeg (+ records track) only, on 3 benchmarks
+#   SemEval-24 8C (H->A boundary), PASTED (AI paraphrase of human text), Beemo (human edits of AI text)
+#   Baselines are run later from their *official* repositories (see README), not from this script.
+# PROFILE=full             all 7 datasets + ProvSeg ablations
 # STAGES="data syntax feats train eval" to choose stages (data/syntax are already done locally).
 set -euo pipefail
 PROFILE=${PROFILE:-small}
@@ -53,11 +53,8 @@ fi
 if has train; then
   for s in $SEEDS; do
     T="--train $TRAIN --eval $TEST --seed $s --out $RUNS --data $DATA --feats $FEATS $LIM $EP"
-    python scripts/train.py --name provseg       --encoder $ENC --model efp $T            # ours (+ provseg_s*_records)
-    python scripts/train.py --name seqxgpt_feats --encoder none --model blackbox $T       # SeqXGPT (EMNLP'23)
-    python scripts/train.py --name pasted_cls    --encoder roberta-large --no_feats --no_crf --model blackbox $T  # PASTED (ACL-F'24)
+    python scripts/train.py --name provseg --encoder $ENC --model efp $T   # ours (+ provseg_s*_records)
     if [ "$PROFILE" = full ]; then
-      python scripts/train.py --name seqroberta     --encoder roberta-large --no_feats --model blackbox $T
       python scripts/train.py --name abl_blackbox   --encoder $ENC --model blackbox $T
       python scripts/train.py --name abl_additive   --encoder $ENC --model additive $T
       python scripts/train.py --name abl_noedit_sup --encoder $ENC --model efp --no_edit $T
@@ -69,7 +66,7 @@ fi
 
 if has eval; then
   python scripts/evaluate.py --runs $RUNS/*_s* --data $DATA --feats $FEATS --train_sets $TRAIN \
-      --test_sets $TEST --zs fastdetect,binoculars,repreguard --out $RES
+      --test_sets $TEST --no_zs --out $RES
   python -m provseg.eval.explain --run $RUNS/provseg_s* --data $DATA --out $RES
   if [ "$PROFILE" = full ]; then
     python scripts/motivation.py --data $DATA --out $RES --figs paper/figs

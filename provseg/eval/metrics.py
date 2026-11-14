@@ -128,7 +128,7 @@ def word_auroc(golds, probs) -> float:
     from sklearn.metrics import roc_auc_score
     g = np.concatenate([np.asarray(x) for x in golds])
     s = np.concatenate([np.asarray(pr)[: len(x), 1] for x, pr in zip(golds, probs)])
-    m = g >= 0
+    m = (g >= 0) & np.isfinite(s)
     return float(roc_auc_score(g[m], s[m])) if len(set(g[m].tolist())) == 2 else float("nan")
 
 
