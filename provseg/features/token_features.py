@@ -138,12 +138,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--records", required=True, help="jsonl of provseg Records")
     ap.add_argument("--out", required=True, help=".npz output: one (n_words, F) array per record")
-    ap.add_argument("--observer", default="Qwen/Qwen2.5-7B")
-    ap.add_argument("--performer", default="Qwen/Qwen2.5-7B-Instruct")
+    ap.add_argument("--observer", default="Qwen/Qwen2.5-0.5B")
+    ap.add_argument("--performer", default="Qwen/Qwen2.5-0.5B-Instruct")
     ap.add_argument("--rep_train", default="", help="DetectRL train json for the rep direction")
     ap.add_argument("--rep_n", type=int, default=512)
     ap.add_argument("--rep_dir_cache", default="")
-    ap.add_argument("--max_len", type=int, default=1024)
+    ap.add_argument("--max_len", type=int, default=512)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--splits", default="", help="only these splits (comma); default all")
     ap.add_argument("--cap", default="train:25000,dev:2500",
@@ -168,6 +168,8 @@ def main():
     feats = {}
     for r in tqdm(todo, desc="features", mininterval=60):
         feats[r["meta"]["uid"]] = fx.word_features(r["words"])
+    if torch.cuda.is_available():
+        print(f"peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f} GB")
     np.savez_compressed(a.out, **feats)
 
 

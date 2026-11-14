@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # RUN 2 - our improvements on top of SeqXGPT (same backbone, one change per step):
-#   S1  + contrastive per-word evidence (Fast-DetectGPT z, Binoculars x-entropy, entropy, rank; Qwen2.5-1.5B pair)
-#   S2  + context encoder (DeBERTa-v3-large)
+#   S1  + contrastive per-word evidence (Fast-DetectGPT z, Binoculars x-entropy, entropy, rank; Qwen2.5-0.5B pair)
+#   S2  + context encoder (DeBERTa-v3-base, bf16)
 #   S3  + certified Unknown (Learn-then-Test) -> Cov@0.05 column of the table
 #   S4  + evidence dropout + exact per-word Shapley explanations  = ProvSeg
 #   outputs : ../runs/provseg/<run>/   ../results/provseg/{table_ladder.md, explain_*.csv, cases_*.html}
@@ -11,9 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/_env.sh
 STEPS=${STEPS:-"feats S1 S2 S4 eval"}
-OBS=${OBS:-Qwen/Qwen2.5-1.5B}
-PERF=${PERF:-Qwen/Qwen2.5-1.5B-Instruct}
-ENC=${ENC:-microsoft/deberta-v3-large}
+OBS=${OBS:-Qwen/Qwen2.5-0.5B}
+PERF=${PERF:-Qwen/Qwen2.5-0.5B-Instruct}
+ENC=${ENC:-microsoft/deberta-v3-base}
 RUNS=$RUNS_ROOT/provseg; RES=$RES_ROOT/provseg; mkdir -p $RUNS $RES
 
 if has feats; then
@@ -27,9 +27,9 @@ for s in $SEEDS; do
     T="--train $ds --seed $s --data $DATA --feats $FEATS --out $RUNS $LIM"
     has S1 && python scripts/train_seq.py --name S1_${ds}_s$s --step S1 --arch seqx --feat_kind contrast $EP_SMALL $T
     has S2 && python scripts/train_seq.py --name S2_${ds}_s$s --step S2 --arch seqx --feat_kind contrast \
-        --context $ENC --bs 16 --lr 1e-4 --enc_lr 2e-5 $EP_ENC $T
+        --context $ENC --bf16 --bs 16 --lr 1e-4 --enc_lr 2e-5 $EP_ENC $T
     has S4 && python scripts/train_seq.py --name S4_${ds}_s$s --step S4 --arch seqx --feat_kind contrast \
-        --context $ENC --bs 16 --lr 1e-4 --enc_lr 2e-5 --evidence_dropout 0.15 --shapley $EP_ENC $T
+        --context $ENC --bf16 --bs 16 --lr 1e-4 --enc_lr 2e-5 --evidence_dropout 0.15 --shapley $EP_ENC $T
   done
 done
 if has eval; then

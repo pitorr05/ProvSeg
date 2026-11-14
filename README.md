@@ -6,11 +6,29 @@ ProvSeg cải tiến SeqXGPT **từng bước**. Mỗi bước chỉ thêm một
 
 | Bước | Thêm gì | Giải quyết điểm yếu nào của SeqXGPT |
 |---|---|---|
-| **S0** | SeqXGPT gốc: 4 LLM log-prob (GPT-2-xl, GPT-Neo-2.7B, GPT-J-6B, LLaMA-7B), CNN, Transformer, BMES-Viterbi | (tái lập) |
-| **S1** | Bằng chứng *tương phản* theo từ: Fast-DetectGPT z, Binoculars x-entropy, entropy, rank (cặp Qwen2.5-1.5B) | log-prob tuyệt đối là "điểm số không ý nghĩa" |
-| **S2** | Ngữ cảnh ngữ nghĩa: DeBERTa-v3-large ghép vào backbone | không hiểu nội dung, yếu khi AI bị người sửa |
+| **S0** | Model SeqXGPT gốc: log-prob từ 4 LLM, CNN, Transformer, BMES-Viterbi | (baseline) |
+| **S1** | Bằng chứng *tương phản* theo từ: Fast-DetectGPT z, Binoculars x-entropy, entropy, rank | log-prob tuyệt đối là "điểm số không ý nghĩa" |
+| **S2** | Ngữ cảnh ngữ nghĩa: DeBERTa-v3 ghép vào backbone | không hiểu nội dung, yếu khi AI bị người sửa |
 | **S3** | "Unknown" có bảo đảm: lỗi ≤ α với xác suất ≥ 1−δ (Learn-then-Test) | luôn bị ép trả lời H/A |
 | **S4** | Evidence dropout + Shapley chính xác theo từng nguồn bằng chứng = **ProvSeg** | không giải thích được "vì sao từ này là AI" |
+
+## Model và tài nguyên (mặc định: model nhỏ, cùng ngân sách cho cả hai lượt)
+| | Lượt 1: SeqXGPT | Lượt 2: ProvSeg |
+|---|---|---|
+| LLM đặc trưng | gpt2, gpt-neo-125m, pythia-410m, Qwen2.5-0.5B | Qwen2.5-0.5B, Qwen2.5-0.5B-Instruct |
+| Encoder | — | DeBERTa-v3-base (bf16) |
+
+Ước lượng: khoảng 5GB ổ đĩa cho model, VRAM đỉnh 6–8GB (mỗi bước có in dòng `peak VRAM`).
+
+**Vì sao paper SeqXGPT dùng 4 LLM (GPT-2-xl, GPT-Neo-2.7B, GPT-J-6B, LLaMA-7B)?**
+- SeqXGPT-Bench được sinh ra bởi chính 4 model đó.
+- Bài toán 6 lớp của paper là đoán *model nào* viết từng câu, nên cần chính các model ấy làm "máy đo".
+
+Bài của mình chỉ phân biệt Người và AI (2 lớp), nên dùng model nhỏ cho **cả hai lượt** để so sánh công bằng. Muốn tái lập đúng số trong paper thì chạy lại với LLM gốc:
+```bash
+S0_LMS=gpt2-xl,EleutherAI/gpt-neo-2.7B,EleutherAI/gpt-j-6b,huggyllama/llama-7b bash run_seqxgpt.sh
+```
+Cách này tốn khoảng 55GB ổ đĩa.
 
 ## Cấu trúc repo
 ```
@@ -53,7 +71,7 @@ bash run_seqxgpt.sh                  # LƯỢT 1 thật: SeqXGPT gốc
 bash run_provseg.sh                  # LƯỢT 2 thật: cải tiến của mình
 cat ../results/compare/table_ladder.md   # SeqXGPT vs S1, S2, S4 trên cùng tài liệu test
 ```
-**Mốc an toàn:** `../results/seqxgpt/repro_6way_*.json`, trường `multiclass_sent_f1` phải gần số trong paper SeqXGPT.
+`../results/seqxgpt/repro_6way_*.json` chứa kết quả SeqXGPT 6 lớp. Kết quả này chỉ khớp với số trong paper khi chạy bằng 4 LLM gốc (xem `S0_LMS` ở trên). Với model nhỏ, đây chỉ là một con số tham khảo.
 
 ## Khác biệt có chủ đích so với code gốc (đều ghi trong paper)
 - Đặc trưng S0 tính bằng HF trực tiếp, không qua server HTTP. Trung bình được tính theo ký tự thay vì theo byte, kết quả như nhau với văn bản ASCII.

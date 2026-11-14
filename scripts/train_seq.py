@@ -44,6 +44,11 @@ SEQX_CLASSES = ["gpt2", "gptneo", "gptj", "llama", "gpt3", "human"]   # SeqXGPT-
 LP4_NAMES = ["nll_gpt2", "nll_gptneo", "nll_gptj", "nll_llama"]
 
 
+def amp(a, dev):
+    """bf16 autocast on CUDA when --bf16 (losses, probabilities and Viterbi are computed in fp32)."""
+    return torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=bool(getattr(a, "bf16", False)) and dev == "cuda")
+
+
 def seed_all(s):
     random.seed(s)
     np.random.seed(s)
@@ -144,7 +149,7 @@ def step_loss(model, a, batch, dev):
         if a.evidence_dropout > 0:
             keep = (torch.rand(x.shape[0], model.n_players, device=dev) >= a.evidence_dropout).float()
         logits = model(x, mask, ctx, keep)
-        return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), tags.to(dev).reshape(-1), ignore_index=-1)
+        return F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), tags.to(dev).reshape(-1), ignore_index=-1)
     if a.arch == "seqroberta":
         tt, _ = token_tags(batch, tags)
         return model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev), tt.to(dev))["loss"]
@@ -225,13 +230,15 @@ def predict(model, a, recs, tok, fs, dev, n_classes):
            for r in recs}
     for batch in make_loader(a, recs, tok, fs, False):
         if a.arch == "sentroberta":
-            p = model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev)).float().softmax(-1).cpu().numpy()
+            with amp(a, dev):
+                p = model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev)).float().softmax(-1).cpu().numpy()
             for k, (ri, (s, e)) in enumerate(zip(batch["rec_idx"], batch["span"])):
                 o = out[recs[ri]["meta"]["uid"]]
                 o["cprob"][s:e] = p[k]
                 o["cls"][s:e] = int(p[k].argmax())
             continue
-        logits, paths = word_logits(model, a, batch, dev)
+        with amp(a, dev):
+            logits, paths = word_logits(model, a, batch, dev)
         cp = class_probs(logits, n_classes).cpu().numpy()
         cls = torch.where(paths >= 0, paths // 4, -1).cpu().numpy()
         for k in range(len(cls)):
@@ -276,7 +283,8 @@ def dump_shapley(model, a, recs, fs, tok, dev, names, path):
             ctx = pad_to(model.context_states(batch["input_ids"].to(dev), batch["attention_mask"].to(dev),
                                               batch["word_index"].to(dev), W), a.win)
         hum = a.classes.index("human")
-        phi, mf, me = channel_shapley(model, x, mask, ctx, pos=1 - hum, n_classes=2)
+        with amp(a, dev):
+            phi, mf, me = channel_shapley(model, x, mask, ctx, pos=1 - hum, n_classes=2)
         phi, mf, me = phi[:, :W].cpu().numpy(), mf[:, :W].cpu().numpy(), me[:, :W].cpu().numpy()
         for k in range(len(phi)):
             r = recs[int(batch["rec_idx"][k])]
@@ -303,6 +311,7 @@ def main():
     ap.add_argument("--context", default="", help="seqx: HF encoder for word context (S2+)")
     ap.add_argument("--encoder", default="roberta-base", help="seqroberta / sentroberta backbone")
     ap.add_argument("--evidence_dropout", type=float, default=0.0)
+    ap.add_argument("--bf16", action="store_true", help="bf16 autocast on CUDA (loss in fp32); saves VRAM")
     ap.add_argument("--multiclass", action="store_true", help="SeqXGPT-Bench 6-way protocol")
     ap.add_argument("--shapley", action="store_true")
     ap.add_argument("--shap_cap", type=int, default=1000)
@@ -352,11 +361,12 @@ def main():
         model.train()
         tot, n = 0.0, 0
         for batch in tqdm(loader, desc=f"epoch {ep + 1}/{a.epochs}", mininterval=30):
-            if a.arch == "sentroberta":
-                logits = model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev))
-                loss = F.cross_entropy(logits, batch["labels"].to(dev), ignore_index=-1)
-            else:
-                loss = step_loss(model, a, batch, dev)
+            with amp(a, dev):
+                if a.arch == "sentroberta":
+                    logits = model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev))
+                    loss = F.cross_entropy(logits.float(), batch["labels"].to(dev), ignore_index=-1)
+                else:
+                    loss = step_loss(model, a, batch, dev)
             if not torch.isfinite(loss):
                 print("[warn] non-finite loss, batch skipped")
                 opt.zero_grad()
@@ -372,6 +382,8 @@ def main():
         if f1 > best:
             best, best_state = f1, copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
     model.load_state_dict(best_state)
+    if dev == "cuda":
+        print(f"[{a.name}] peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f} GB")
 
     rd = os.path.join(a.out, a.name)
     os.makedirs(rd, exist_ok=True)

@@ -6,8 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/_env.sh
 STEPS=${STEPS:-"supervised zeroshot eval"}
-OBS=${OBS:-Qwen/Qwen2.5-1.5B}
-PERF=${PERF:-Qwen/Qwen2.5-1.5B-Instruct}
+OBS=${OBS:-Qwen/Qwen2.5-0.5B}
+PERF=${PERF:-Qwen/Qwen2.5-0.5B-Instruct}
 RB=${RB:-roberta-base}
 RUNS=$RUNS_ROOT/baselines; RES=$RES_ROOT/baselines; mkdir -p $RUNS $RES
 for s in $SEEDS; do

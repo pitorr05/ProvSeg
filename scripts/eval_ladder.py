@@ -32,7 +32,7 @@ from provseg.eval.metrics import (boundary_mae, sentence_metrics, word_auroc,  #
 
 ORDER = ["S0", "S1", "S2", "S4", "baseline"]
 PRETTY = {
-    "S0": "S0  SeqXGPT [EMNLP'23] (official, reproduced)",
+    "S0": "S0  SeqXGPT [EMNLP'23] (official model, small feature LMs)",
     "S1": "S1  + contrastive evidence (Fast-DetectGPT/Binoculars per word)",
     "S2": "S2  + context encoder",
     "S4": "S4  + evidence dropout = **ProvSeg (ours)**",

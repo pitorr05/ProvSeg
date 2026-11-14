@@ -18,7 +18,8 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-DEFAULT_LMS = "gpt2-xl,EleutherAI/gpt-neo-2.7B,EleutherAI/gpt-j-6b,huggyllama/llama-7b"
+PAPER_LMS = "gpt2-xl,EleutherAI/gpt-neo-2.7B,EleutherAI/gpt-j-6b,huggyllama/llama-7b"   # SeqXGPT paper
+DEFAULT_LMS = "gpt2,EleutherAI/gpt-neo-125m,EleutherAI/pythia-410m,Qwen/Qwen2.5-0.5B"   # small, same budget as ProvSeg
 
 
 def word_char_spans(words):
@@ -46,7 +47,7 @@ def tokens_to_words(offsets, values, words):
 
 
 class LogProbLM:
-    def __init__(self, name, max_len=1024, dtype=torch.bfloat16):
+    def __init__(self, name, max_len=512, dtype=torch.bfloat16):
         self.dev = "cuda" if torch.cuda.is_available() else "cpu"
         self.tok = AutoTokenizer.from_pretrained(name, use_fast=True)
         if self.tok.pad_token is None:
@@ -94,8 +95,8 @@ def main():
     ap.add_argument("--records", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--lms", default=DEFAULT_LMS, help="comma-separated HF causal LMs, one channel each")
-    ap.add_argument("--max_len", type=int, default=1024)
-    ap.add_argument("--bs", type=int, default=8)
+    ap.add_argument("--max_len", type=int, default=512)
+    ap.add_argument("--bs", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--splits", default="")
     ap.add_argument("--cap", default="train:25000,dev:2500")
@@ -111,6 +112,8 @@ def main():
         for i in tqdm(range(0, len(docs), 256), desc=name, mininterval=30):
             vals += lm.doc_features(docs[i:i + 256], a.bs)
         cols.append(vals)
+        if torch.cuda.is_available():
+            print(f"{name}: peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f} GB")
         del lm
         torch.cuda.empty_cache()
     feats = {r["meta"]["uid"]: np.stack([c[k] for c in cols], 1).astype(np.float32) for k, r in enumerate(todo)}

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# RUN 1 - reproduce the baseline SeqXGPT (Wang et al., EMNLP 2023) with its OFFICIAL model code.
-#   features : per-word log-prob from the paper's 4 LMs (GPT-2-xl, GPT-Neo-2.7B, GPT-J-6B, LLaMA-7B)
+# RUN 1 - baseline SeqXGPT (Wang et al., EMNLP 2023) with its OFFICIAL model code.
+#   features : per-word log-prob from 4 white-box LMs. The paper used GPT-2-xl, GPT-Neo-2.7B, GPT-J-6B, LLaMA-7B
+#              (the generators of SeqXGPT-Bench); to save VRAM/disk we use 4 SMALL LMs, the same budget as
+#              ProvSeg (set S0_LMS=... to override, e.g. the paper's LMs for an exact reproduction).
 #   model    : baselines/seqxgpt/official/seqxgpt_model.py (unchanged), 20 epochs, lr 5e-5
 #   outputs  : ../runs/seqxgpt/<run>/   ../results/seqxgpt/table_ladder.md
-#   repro    : 6-way SeqXGPT-Bench protocol -> compare multiclass_sent_f1 with the SeqXGPT paper
+#   repro    : 6-way SeqXGPT-Bench protocol (matches the paper's numbers only with the paper's LMs)
 # Usage:  bash run_seqxgpt.sh        (STEPS="feats train repro eval", LIMIT=50 for a quick test)
 set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/_env.sh
 STEPS=${STEPS:-"feats train repro eval"}
-S0_LMS=${S0_LMS:-gpt2-xl,EleutherAI/gpt-neo-2.7B,EleutherAI/gpt-j-6b,huggyllama/llama-7b}
+S0_LMS=${S0_LMS:-gpt2,EleutherAI/gpt-neo-125m,EleutherAI/pythia-410m,Qwen/Qwen2.5-0.5B}
 RUNS=$RUNS_ROOT/seqxgpt; RES=$RES_ROOT/seqxgpt; mkdir -p $RUNS $RES
 
 if has feats; then
