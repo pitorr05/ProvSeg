@@ -5,8 +5,10 @@ tagger answers only words with c >= lam and abstains ("Unknown") otherwise.
 Selective risk  R(lam) = P(wrong | answered).
 
 We pick the smallest lam (max coverage) such that R(lam) <= alpha is certified
-with prob >= 1 - delta, via Learn-then-Test (Angelopoulos et al., 2021) with a
-fixed-sequence binomial test over a decreasing-risk grid. Calibration units are
+with prob >= 1 - delta, via Learn-then-Test (Angelopoulos et al., 2021). Default:
+Bonferroni over a FIXED grid of thresholds (each tested at delta/|grid|), which stays
+powerful when very high thresholds answer too few documents (the earlier
+fixed-sequence variant stopped at that first, under-powered test and certified nothing). Calibration units are
 *documents* (words inside a document are dependent), so the test runs on
 document-level sums: we use the Hoeffding-Bentkus p-value on per-document
 error fractions weighted by answered words, conservative but valid for
@@ -54,7 +56,12 @@ class SelectiveCalibrator:
     alpha: float = 0.05
     delta: float = 0.1
     span_mode: bool = True
+    method: str = "bonferroni"   # or "fixed_sequence"
     lam: float = 1.01   # abstain on everything until calibrated
+
+    @staticmethod
+    def default_grid():
+        return np.unique(np.concatenate([np.linspace(0.5, 0.95, 10), 1 - np.logspace(-1.3, -4, 15)]))[::-1]
 
     def _doc_stats(self, preds, confs, golds, lam):
         risks, answered = [], 0
@@ -72,6 +79,18 @@ class SelectiveCalibrator:
         ambig: optional list of per-word ambiguity u >= 0 (confidence becomes p_max / (1 + u))."""
         ambig = ambig if ambig is not None else [None] * len(preds)
         confs = [self.confidence(p, pr, u) for p, pr, u in zip(preds, probs, ambig)]
+        if self.method == "bonferroni":
+            grid = self.default_grid() if grid is None else np.asarray(grid)
+            best = None
+            for lam in grid:                       # all thresholds tested, each at delta / |grid|
+                risks, _ = self._doc_stats(preds, confs, golds, lam)
+                if len(risks) < 10:
+                    continue
+                fr = np.array([e / k for e, k in risks])
+                if _hb_pvalue(float(fr.mean()), len(fr), self.alpha) <= self.delta / len(grid):
+                    best = lam if best is None else min(best, lam)
+            self.lam = 1.01 if best is None else float(best)
+            return self
         grid = np.linspace(0.999, 0.0, 400) if grid is None else grid  # high -> low lam (u can push c below .5)
         best = None
         for lam in grid:   # fixed-sequence testing: stop at first failure

@@ -30,11 +30,12 @@ from provseg.data.torch_data import load_records  # noqa: E402
 from provseg.eval.metrics import (boundary_mae, sentence_metrics, word_auroc,  # noqa: E402
                                   word_metrics)
 
-ORDER = ["S0", "S1", "S2", "S4", "baseline"]
+ORDER = ["S0", "S1", "S2", "S2b", "S4", "baseline"]
 PRETTY = {
     "S0": "S0  SeqXGPT [EMNLP'23] (official model, small feature LMs)",
     "S1": "S1  + contrastive evidence (Fast-DetectGPT/Binoculars per word)",
-    "S2": "S2  + context encoder",
+    "S2": "S2  + context encoder (Evidence Reader)",
+    "S2b": "S2b + Boundary Curator",
     "S4": "S4  + evidence dropout = **ProvSeg (ours)**",
     "seqroberta": "Seq-RoBERTa [SeqXGPT repo]",
     "sentroberta": "Sent-RoBERTa [SeqXGPT repo]",
@@ -68,9 +69,10 @@ def main():
     ap.add_argument("--runs", nargs="+", required=True)
     ap.add_argument("--data", default="../data/processed")
     ap.add_argument("--out", default="../results_ladder")
-    ap.add_argument("--alpha", type=float, default=0.05)
+    ap.add_argument("--alphas", default="0.05,0.1", help="certified error levels for the Unknown (S3) columns")
     ap.add_argument("--delta", type=float, default=0.1)
     a = ap.parse_args()
+    alphas = [float(x) for x in a.alphas.split(",")]
     os.makedirs(a.out, exist_ok=True)
     rows = []
     for ds, runs in sorted(load_runs(a.runs).items()):
@@ -90,12 +92,13 @@ def main():
                 row["MAE"] = boundary_mae(g, p)
             cal = [u for u, v in d.items() if v["split"] == "cal" and u in recs]
             if len(cal) >= 50:
-                c = SelectiveCalibrator(alpha=a.alpha, delta=a.delta).fit(
-                    [np.asarray(d[u]["pred"]) for u in cal], [np.asarray(d[u]["prob"]) for u in cal],
-                    [np.asarray(recs[u]["labels"]) for u in cal])
-                sel = word_metrics(g, [c.apply(x, y) for x, y in zip(p, pr)])
-                row[f"Cov@{a.alpha}"] = sel["coverage"]
-                row[f"Risk@{a.alpha}"] = sel.get("selective_risk", float("nan"))
+                for al in alphas:
+                    c = SelectiveCalibrator(alpha=al, delta=a.delta).fit(
+                        [np.asarray(d[u]["pred"]) for u in cal], [np.asarray(d[u]["prob"]) for u in cal],
+                        [np.asarray(recs[u]["labels"]) for u in cal])
+                    sel = word_metrics(g, [c.apply(x, y) for x, y in zip(p, pr)])
+                    row[f"Cov@{al:g}"] = sel["coverage"]
+                    row[f"Risk@{al:g}"] = sel.get("selective_risk", float("nan"))
             rows.append(row)
     if not rows:
         print("no runs found for", a.runs)
@@ -106,18 +109,19 @@ def main():
     df.to_csv(os.path.join(a.out, "ladder.csv"), index=False)
     lines = ["# ProvSeg ladder (test split; same documents for every row of a benchmark)", ""]
     for ds, g in df.groupby("dataset", sort=False):
-        cols = [c for c in ["F1w", "AUROC", "F1s", "MAE", f"Cov@{a.alpha}", f"Risk@{a.alpha}"] if c in g and g[c].notna().any()]
+        sel_cols = [c for al in alphas for c in (f"Cov@{al:g}", f"Risk@{al:g}")]
+        cols = [c for c in ["F1w", "AUROC", "F1s", "MAE"] + sel_cols if c in g and g[c].notna().any()]
         lines += [f"## {ds}  (n={int(g['n_docs'].iloc[0])} docs)", "",
                   "| method | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
         for _, r in g.iterrows():
             vals = [("%.2f" % r[c]) if c == "MAE" else ("%.1f" % (100 * r[c])) if pd.notna(r[c]) else "-" for c in cols]
             lines.append(f"| {r['method']} | " + " | ".join(vals) + " |")
         lines.append("")
-    lines += [f"Cov@{a.alpha}: % words answered with certified error <= {a.alpha} (delta={a.delta}); "
-              "this is step S3 (+ certified Unknown), applied on top of each row's probabilities.", ""]
+    lines += [f"Cov@a: % words answered with certified error <= a (prob >= 1-{a.delta}); Risk@a: realised error on "
+              "answered words. This is step S3 (+ certified Unknown), applied on top of each row's probabilities.", ""]
     open(os.path.join(a.out, "table_ladder.md"), "w", encoding="utf8").write("\n".join(lines))
     print("\n".join(lines))
-    json.dump({"alpha": a.alpha, "delta": a.delta}, open(os.path.join(a.out, "eval_config.json"), "w"))
+    json.dump({"alphas": alphas, "delta": a.delta}, open(os.path.join(a.out, "eval_config.json"), "w"))
 
 
 if __name__ == "__main__":

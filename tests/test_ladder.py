@@ -92,3 +92,59 @@ def test_sentence_protocol():
     p = [np.array([0, 1, 1, 1, 0, 0])]
     m = sentence_metrics([ws], g, p)
     assert abs(m["sent_acc"] - 2 / 3) < 1e-9
+
+
+def test_segment_starts_and_boundary_fusion():
+    from provseg.models.seqx import segment_starts
+    tags = torch.tensor([[0, 1, 2, 4, 6, 3, -1]])          # B-h M-h E-h B-AI E-AI S-h pad
+    assert segment_starts(tags).tolist() == [[1, 0, 0, 1, 0, 1, -1]]
+    torch.manual_seed(0)
+    m = SeqXNet(ID2, seq_len=16, n_channels=3, boundary=True).eval()
+    x, mask = torch.randn(2, 16, 3), torch.ones(2, 16, dtype=torch.bool)
+    lo = m(x, mask)
+    assert torch.isfinite(lo).all() and m.last_boundary.shape == (2, 16)
+    phi, mf, me = channel_shapley(m, x, mask)               # explanation still exact with the curator
+    assert torch.allclose(phi.sum(-1), mf - me, atol=1e-4)
+
+
+def test_context_encoder_runs_outside_autocast():
+    m = SeqXNet(ID2, seq_len=8, n_channels=2).eval()
+    seen = {}
+
+    class FakeEnc(torch.nn.Module):
+        def forward(self, input_ids, attention_mask):
+            seen["autocast"] = torch.is_autocast_enabled("cpu")
+            h = torch.randn(*input_ids.shape, 4)
+            h[attention_mask == 0] = float("nan")           # what DeBERTa-v3 emits at padding in bf16
+            return type("O", (), {"last_hidden_state": h})()
+
+    m.enc, m.ctx_proj = FakeEnc(), torch.nn.Linear(4, 3)
+    ids = torch.ones(1, 5, dtype=torch.long)
+    att = torch.tensor([[1, 1, 1, 0, 0]])
+    widx = torch.tensor([[0, 1, 1, -1, -1]])
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        out = m.context_states(ids, att, widx, 2)
+    assert seen["autocast"] is False and torch.isfinite(out).all()
+
+
+def test_bonferroni_calibrator_certifies_partial_coverage():
+    from provseg.conformal.selective import SelectiveCalibrator
+    rng = np.random.default_rng(0)
+
+    def docs(n):
+        P, Pr, G = [], [], []
+        for _ in range(n):
+            conf = rng.uniform(0.5, 1.0, 80)
+            gold = rng.integers(0, 2, 80)
+            wrong = rng.random(80) > conf            # calibrated: error prob = 1 - conf (~25% overall)
+            pred = np.where(wrong, 1 - gold, gold)
+            prob = np.stack([np.where(pred == 0, conf, 1 - conf), np.where(pred == 1, conf, 1 - conf)], 1)
+            P.append(pred); Pr.append(prob); G.append(gold)
+        return P, Pr, G
+    c = SelectiveCalibrator(alpha=0.1, delta=0.1, span_mode=False).fit(*docs(300))
+    P, Pr, G = docs(300)
+    out = np.concatenate([c.apply(p, pr) for p, pr in zip(P, Pr)])
+    g = np.concatenate(G)
+    ans = out != 2
+    assert 0.05 < ans.mean() < 1.0
+    assert (out[ans] != g[ans]).mean() <= 0.1

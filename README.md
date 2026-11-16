@@ -1,3 +1,5 @@
+> Cách làm paper và kế hoạch ICLR 2028: xem `SKILL_ICLR.md`.
+
 # ProvSeg: phát hiện từng từ do Người hay AI viết, đi lên từ SeqXGPT (EMNLP 2023)
 
 **Paper gốc (baseline chính): SeqXGPT** (Wang et al., EMNLP 2023). Đây là paper A* đầu tiên làm phát hiện AI ở mức câu/từ trong văn bản trộn Người+AI. Code chính thức được giữ **nguyên văn** trong `baselines/seqxgpt/official/` (Apache-2.0).
@@ -9,6 +11,7 @@ ProvSeg cải tiến SeqXGPT **từng bước**. Mỗi bước chỉ thêm một
 | **S0** | Model SeqXGPT gốc: log-prob từ 4 LLM, CNN, Transformer, BMES-Viterbi | (baseline) |
 | **S1** | Bằng chứng *tương phản* theo từ: Fast-DetectGPT z, Binoculars x-entropy, entropy, rank | log-prob tuyệt đối là "điểm số không ý nghĩa" |
 | **S2** | Ngữ cảnh ngữ nghĩa: DeBERTa-v3 ghép vào backbone | không hiểu nội dung, yếu khi AI bị người sửa |
+| **S2b** | Boundary Curator: head "segment bắt đầu ở đây" hợp nhất vào giải mã BMES | lỗi dồn quanh ranh giới người↔AI |
 | **S3** | "Unknown" có bảo đảm: lỗi ≤ α với xác suất ≥ 1−δ (Learn-then-Test) | luôn bị ép trả lời H/A |
 | **S4** | Evidence dropout + Shapley chính xác theo từng nguồn bằng chứng = **ProvSeg** | không giải thích được "vì sao từ này là AI" |
 
@@ -69,7 +72,9 @@ LIMIT=50 bash run_provseg.sh         # thử nhanh lượt 2
 
 bash run_seqxgpt.sh                  # LƯỢT 1 thật: SeqXGPT gốc
 bash run_provseg.sh                  # LƯỢT 2 thật: cải tiến của mình
-cat ../results/compare/table_ladder.md   # SeqXGPT vs S1, S2, S4 trên cùng tài liệu test
+cat ../results/compare/table_ladder.md   # SeqXGPT vs S1, S2, S2b, S4 trên cùng tài liệu test
+python scripts/diagnose.py --runs "../runs/seqxgpt/S0_*" "../runs/provseg/*" --data ../data/processed --out ../results/diagnose
+                                          # đo 3 lỗi của SeqXGPT (motivation), ra figF1_failure_modes.pdf
 ```
 `../results/seqxgpt/repro_6way_*.json` chứa kết quả SeqXGPT 6 lớp. Kết quả này chỉ khớp với số trong paper khi chạy bằng 4 LLM gốc (xem `S0_LMS` ở trên). Với model nhỏ, đây chỉ là một con số tham khảo.
 

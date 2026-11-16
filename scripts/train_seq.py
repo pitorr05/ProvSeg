@@ -38,7 +38,7 @@ from provseg.data.torch_data import FeatureStore, WindowDataset, cap_subset, loa
 from provseg.eval.metrics import all_metrics, sentence_metrics, sentence_spans  # noqa: E402
 from provseg.features.token_features import FEAT_NAMES  # noqa: E402
 from provseg.models.seqx import (SeqXNet, bmes_id2label, channel_shapley, class_probs,  # noqa: E402
-                                 to_bmes)
+                                 segment_starts, to_bmes)
 
 SEQX_CLASSES = ["gpt2", "gptneo", "gptj", "llama", "gpt3", "human"]   # SeqXGPT-Bench, 6-way protocol
 LP4_NAMES = ["nll_gpt2", "nll_gptneo", "nll_gptj", "nll_llama"]
@@ -112,7 +112,8 @@ def build(a, n_classes, n_channels):
         assert n_channels == 4, "official SeqXGPT expects exactly 4 LM channels (--feat_kind lp4)"
         return ModelWiseTransformerClassifier(id2labels=id2label, seq_len=a.win)
     if a.arch == "seqx":
-        return SeqXNet(id2label, seq_len=a.win, n_channels=n_channels, context=a.context or None)
+        return SeqXNet(id2label, seq_len=a.win, n_channels=n_channels, context=a.context or None,
+                       boundary=a.boundary_head)
     if a.arch == "seqroberta":
         return SeqRoBERTaClassifier(a.encoder, id2label)
     if a.arch == "sentroberta":
@@ -149,7 +150,14 @@ def step_loss(model, a, batch, dev):
         if a.evidence_dropout > 0:
             keep = (torch.rand(x.shape[0], model.n_players, device=dev) >= a.evidence_dropout).float()
         logits = model(x, mask, ctx, keep)
-        return F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), tags.to(dev).reshape(-1), ignore_index=-1)
+        tags = tags.to(dev)
+        loss = F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), tags.reshape(-1), ignore_index=-1)
+        if model.boundary:                       # Boundary Curator: rare positives -> pos_weight
+            st = segment_starts(tags)
+            m = st >= 0
+            loss = loss + a.lam_bnd * F.binary_cross_entropy_with_logits(
+                model.last_boundary[m], st[m].float(), pos_weight=torch.tensor(a.bnd_pos_weight, device=dev))
+        return loss
     if a.arch == "seqroberta":
         tt, _ = token_tags(batch, tags)
         return model(batch["input_ids"].to(dev), batch["attention_mask"].to(dev), tt.to(dev))["loss"]
@@ -247,6 +255,14 @@ def predict(model, a, recs, tok, fs, dev, n_classes):
             o = out[recs[ri]["meta"]["uid"]]
             o["cls"][s:s + n] = cls[k, :n]
             o["cprob"][s:s + n] = cp[k, :n]
+    n_bad = 0
+    for o in out.values():   # never let NaN reach the metrics silently
+        bad = ~np.isfinite(o["cprob"]).all(-1)
+        if bad.any():
+            n_bad += int(bad.sum())
+            o["cprob"][bad] = 1.0 / n_classes
+    if n_bad:
+        print(f"[warn] {n_bad} words had non-finite probabilities (set to uniform)")
     for o in out.values():   # words dropped by sub-token truncation: most probable class
         bad = o["cls"] < 0
         o["cls"][bad] = o["cprob"][bad].argmax(-1)
@@ -311,7 +327,10 @@ def main():
     ap.add_argument("--context", default="", help="seqx: HF encoder for word context (S2+)")
     ap.add_argument("--encoder", default="roberta-base", help="seqroberta / sentroberta backbone")
     ap.add_argument("--evidence_dropout", type=float, default=0.0)
-    ap.add_argument("--bf16", action="store_true", help="bf16 autocast on CUDA (loss in fp32); saves VRAM")
+    ap.add_argument("--bf16", action="store_true", help="bf16 autocast on CUDA for the head (encoder stays fp32)")
+    ap.add_argument("--boundary_head", action="store_true", help="S2b Boundary Curator")
+    ap.add_argument("--lam_bnd", type=float, default=0.5)
+    ap.add_argument("--bnd_pos_weight", type=float, default=5.0)
     ap.add_argument("--multiclass", action="store_true", help="SeqXGPT-Bench 6-way protocol")
     ap.add_argument("--shapley", action="store_true")
     ap.add_argument("--shap_cap", type=int, default=1000)
@@ -345,7 +364,8 @@ def main():
         fs.fit_norm([r["meta"]["uid"] for r in tr])
     use_tok = a.arch in ("seqroberta", "sentroberta") or (a.arch == "seqx" and a.context)
     tok = AutoTokenizer.from_pretrained(a.context if a.arch == "seqx" else a.encoder) if use_tok else None
-    model = build(a, n_classes, len(names)).to(dev)
+    # always train fp32 master weights (official Seq/Sent-RoBERTa classes load with the checkpoint dtype)
+    model = build(a, n_classes, len(names)).float().to(dev)
     print(f"[{a.name}] arch={a.arch} channels={names} context={a.context or '-'} train={len(tr)} dev={len(dv)} "
           f"params={sum(p.numel() for p in model.parameters()) / 1e6:.1f}M device={dev}")
 
@@ -359,7 +379,7 @@ def main():
     best, best_state, t0 = -1.0, None, time.time()
     for ep in range(a.epochs):
         model.train()
-        tot, n = 0.0, 0
+        tot, n, skipped = 0.0, 0, 0
         for batch in tqdm(loader, desc=f"epoch {ep + 1}/{a.epochs}", mininterval=30):
             with amp(a, dev):
                 if a.arch == "sentroberta":
@@ -367,18 +387,25 @@ def main():
                     loss = F.cross_entropy(logits.float(), batch["labels"].to(dev), ignore_index=-1)
                 else:
                     loss = step_loss(model, a, batch, dev)
-            if not torch.isfinite(loss):
-                print("[warn] non-finite loss, batch skipped")
-                opt.zero_grad()
-                continue
             opt.zero_grad()
+            if not torch.isfinite(loss):
+                skipped += 1
+                continue
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if not torch.isfinite(gn):              # NaN/inf gradient: never let it reach the weights
+                opt.zero_grad()
+                skipped += 1
+                continue
             opt.step()
             sch.step()
             tot, n = tot + loss.item(), n + 1
+        bad = [k for k, v in model.state_dict().items() if v.is_floating_point() and not torch.isfinite(v).all()]
+        if bad:
+            raise SystemExit(f"[{a.name}] non-finite weights after epoch {ep + 1}: {bad[:5]} - aborting")
         f1 = dev_score(model, a, dv, tok, fs, dev, n_classes, hum)
-        print(f"epoch {ep + 1}: train_loss {tot / max(n, 1):.4f}  dev word macro-F1 {f1:.4f}  ({(time.time() - t0) / 60:.1f} min)")
+        print(f"epoch {ep + 1}: train_loss {tot / max(n, 1):.4f}  dev word macro-F1 {f1:.4f}  "
+              f"skipped_batches {skipped}/{skipped + n}  ({(time.time() - t0) / 60:.1f} min)")
         if f1 > best:
             best, best_state = f1, copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
     model.load_state_dict(best_state)

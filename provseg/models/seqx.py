@@ -9,6 +9,9 @@ the vendored official class with shared weights) and adds, one at a time:
 
   S1  evidence: any number of channels (contrastive Fast-DetectGPT / Binoculars evidence)
   S2  context:  word states of a pretrained encoder (DeBERTa-v3), projected and concatenated
+  S2b Boundary Curator: a per-word "a new segment starts here" head (trained with BCE) whose
+      log-probabilities are added to the B/S vs M/E tag scores before decoding, so evidence about
+      authorship *changes* is modelled explicitly instead of only through per-word labels.
   S4  evidence dropout: whole channels are zeroed at random during training, so "channel
       absent" is in-distribution and exact channel-level Shapley values are meaningful.
 """
@@ -18,6 +21,7 @@ import itertools
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
@@ -32,6 +36,11 @@ CONV_LAYERS = [(64, 5, 1)] + [(128, 3, 1)] * 3 + [(64, 3, 1)]   # SeqXGPT's feat
 def bmes_id2label(classes):
     """Same construction as SeqXGPT's construct_bmes_labels: class-major, B/M/E/S minor."""
     return {k * 4 + j: p + c for k, c in enumerate(classes) for j, p in enumerate(BMES)}
+
+
+def segment_starts(tags):
+    """BMES tag ids (-1 = pad) -> 1 where a segment starts (B-* or S-*), 0 elsewhere, -1 on padding."""
+    return torch.where(tags < 0, -1, ((tags % 4 == 0) | (tags % 4 == 3)).long())
 
 
 def to_bmes(cls_ids, n_classes=None):
@@ -101,15 +110,18 @@ class SeqXNet(nn.Module):
     """
 
     def __init__(self, id2labels, seq_len, n_channels=4, context=None, ctx_dim=256,
-                 intermediate_size=512, num_layers=2, nhead=16, dropout_rate=0.1):
+                 intermediate_size=512, num_layers=2, nhead=16, dropout_rate=0.1, boundary=False):
         super().__init__()
         self.n_channels, self.seq_len = n_channels, seq_len
+        self.last_boundary = None
         self.conv = ConvFeatureExtractionModel(conv_layers=CONV_LAYERS, conv_dropout=0.0, conv_bias=False)
         self.enc = None
         emb = n_channels * 64
         if context:
             from transformers import AutoModel
-            self.enc = AutoModel.from_pretrained(context)
+            # fp32 master weights: transformers>=5 loads checkpoints in their stored dtype (fp16 for
+            # DeBERTa-v3), and AdamW on fp16 weights (eps=1e-8 underflows) turns them into NaN
+            self.enc = AutoModel.from_pretrained(context, torch_dtype=torch.float32)
             self.ctx_proj = nn.Linear(self.enc.config.hidden_size, ctx_dim)
             emb += ctx_dim
         self.embedding_size = emb
@@ -123,6 +135,11 @@ class SeqXNet(nn.Module):
         self.classifier = nn.Sequential(nn.Linear(emb, self.label_num))
         self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=allowed_transitions(id2labels))
         self.crf.trans_m.data *= 0
+        self.boundary = boundary
+        if boundary:
+            self.bnd = nn.Linear(emb, 1)
+            start = torch.tensor([1.0 if j % 4 in (0, 3) else 0.0 for j in range(self.label_num)])  # B-*, S-*
+            self.register_buffer("start_tags", start, persistent=False)
 
     @property
     def n_players(self):
@@ -131,8 +148,12 @@ class SeqXNet(nn.Module):
 
     # -- context
     def context_states(self, input_ids, attention_mask, word_index, W):
-        h = self.enc(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
-        return self.ctx_proj(pool_words(h, word_index, W))
+        # the encoder always runs in fp32: DeBERTa-v3 under bf16 produces NaN at padding positions,
+        # which poisons the *backward* pass even when the forward output is masked
+        with torch.autocast(device_type=input_ids.device.type, enabled=False):
+            h = self.enc(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            pooled = pool_words(h, word_index, W)
+        return self.ctx_proj(pooled)
 
     # -- head (everything after the expensive encoder; cheap enough to run 2^K times for Shapley)
     def head(self, x, mask, ctx=None, keep=None):
@@ -150,8 +171,14 @@ class SeqXNet(nn.Module):
         out = torch.cat(outs, dim=2)
         out = out + self.position_encoding[:L].to(out.dtype)
         out = self.norm(out)
-        out = self.encoder(out, src_key_padding_mask=~mask)
-        return self.classifier(self.dropout(out))
+        out = self.dropout(self.encoder(out, src_key_padding_mask=~mask))
+        logits = self.classifier(out)
+        if self.boundary:
+            b = self.bnd(out).squeeze(-1).float()                  # logit of "segment starts here"
+            self.last_boundary = b
+            s = self.start_tags.to(logits.device)
+            logits = logits.float() + F.logsigmoid(b)[..., None] * s + F.logsigmoid(-b)[..., None] * (1 - s)
+        return logits
 
     def forward(self, x, mask, ctx=None, keep=None):
         return self.head(x, mask, ctx, keep)
