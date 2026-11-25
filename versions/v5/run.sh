@@ -22,6 +22,7 @@ python scripts/explain_deletion.py --runs "$R/provseg/S4_*" --data ../data/proce
 step "risk-coverage"
 python scripts/plot_risk_coverage.py --runs "$R/seqxgpt/S0_*" "$R/provseg/*" "$R/baselines/*" \
     --data ../data/processed --out $RES/robust || exit 14
+step "cost";  python scripts/parse_cost.py --logs "../logs/*.log" --out $RES/robust || true
 step "robust table"
 python scripts/eval_ladder.py --runs "$R/robust/*" --data ../data/processed --out $RES/robust || exit 15
 step "verify"

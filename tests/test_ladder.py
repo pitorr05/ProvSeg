@@ -203,3 +203,17 @@ def test_coauthor_replay_authorship():
     text, auth = replay(ev)
     assert text == "Prompt. I ran away."
     assert auth[:13] == [0] * 13 and auth[13:] == [1] * len(" away.")
+
+
+def test_deletion_test_on_additive_model():
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from explain_deletion import analyse
+    rng = np.random.default_rng(0)
+    sh = {"__players__": ["a", "b", "c"]}
+    for i in range(40):
+        phi = rng.normal(0, 1, (30, 3)) * np.array([3.0, 1.0, 0.1])
+        mf = phi.sum(1) + 0.2
+        sh[f"d{i}"] = {"phi": phi, "m_full": mf, "m_loo": mf[:, None] - phi}   # additive: removing k drops phi_k
+    res = analyse(sh, rng, B=200)
+    assert res["faithful"] and res["mean_abs_d_top"] > res["mean_abs_d_rand"] > res["mean_abs_d_min"]
+    assert res["spearman_absphi_absdelta"] > 0.99
