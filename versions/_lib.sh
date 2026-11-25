@@ -7,6 +7,6 @@ need() {  # need <file> <task id in PROMPT.md>: fail fast if a piece of code the
 }
 step() { echo; echo "=== [$(date +%T)] $V: $*"; }
 # output roots (LIMIT>0 = quick test dirs, same convention as scripts/_env.sh)
-if [ "${LIMIT:-0}" -gt 0 ]; then R=../runs_test; RES=../results_test; FD=../data/feats_small_test; VQ=--no_auroc_check
-else R=../runs; RES=../results; FD=../data/feats_small; VQ=""; fi
+if [ "${LIMIT:-0}" -gt 0 ]; then R=../runs_test; RES=../results_test; FD=../data/feats_small_test; VQ=--no_auroc_check; LIMARG="--limit $LIMIT"
+else R=../runs; RES=../results; FD=../data/feats_small; VQ=""; LIMARG=""; fi
 mkdir -p "$RES"

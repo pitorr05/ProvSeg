@@ -168,3 +168,27 @@ def test_window_diff_and_bootstrap_counts():
     p = np.array([0] * 12 + [1] * 8)
     from sklearn.metrics import f1_score
     assert abs(macro_f1_from_counts(doc_counts(g[0], p)) - f1_score(g[0], p, average="macro")) < 1e-9
+
+
+def test_wcp_finds_single_change_point():
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from baseline_wcp import segment_doc, weighted_dp
+    y = np.r_[np.zeros(6), np.ones(6) * 3] + np.random.default_rng(0).normal(0, 0.1, 12)
+    res = weighted_dp(y, np.ones(12), 3)
+    assert res[1][1] == [6]
+    words = (["w"] * 4 + ["end."]) * 6
+    z = np.r_[np.zeros(15), np.ones(15) * 4] + np.random.default_rng(1).normal(0, 0.3, 30)
+    s = segment_doc(z, words, power=2.0)
+    assert s[:15].max() < s[15:].min()
+
+
+def test_markov_layer_smooths_isolated_flips():
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from baseline_markov import MRFCalibration, adjacency
+    m = MRFCalibration(t=10, filter_pos=0)
+    with torch.no_grad():
+        m.w1.fill_(1.0); m.w11.fill_(1.0); m.w_prime1.fill_(0.0); m.w_prime11.fill_(0.0)
+    s = torch.tensor([[0.9] * 5 + [0.2] + [0.9] * 5])          # one noisy human-looking word inside AI text
+    x = torch.stack([1 - s, s], -1)
+    q = m.calibrated(x, adjacency(11, 0), torch.ones(1, 11))
+    assert q[0, 5] > 0.5 > 0.2                                  # neighbours pull it back to "machine"

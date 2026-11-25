@@ -41,6 +41,11 @@ PRETTY = {
     "sentroberta": "Sent-RoBERTa [SeqXGPT repo]",
     "fastdetect": "Fast-DetectGPT [ICLR'24] (sentence)",
     "binoculars": "Binoculars [ICML'24] (sentence)",
+    "markov_fdg": "Fast-DetectGPT + Markov calib. [ICLR'26]",
+    "markov_bino": "Binoculars + Markov calib. [ICLR'26]",
+    "markov_raw_fdg": "Fast-DetectGPT per-word (uncalibrated)",
+    "markov_raw_bino": "Binoculars per-word (uncalibrated)",
+    "wcp": "WCP change-point [2026]",
 }
 
 

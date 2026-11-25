@@ -7,9 +7,12 @@ step "supervised + zero-shot baselines"; bash run_baselines.sh || exit 10
 SETS=${SETS:-seqxgpt,semeval8c,beemo}
 for ds in ${SETS//,/ }; do
   step "Markov-informed calibration (ICLR'26) on $ds"
-  python scripts/baseline_markov.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines || exit 11
+  python scripts/baseline_markov.py --ds $ds --score fdg --t 10 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score bino --t 10 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score fdg --t 0 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score bino --t 0 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
   step "WCP change-point (2026) on $ds"
-  python scripts/baseline_wcp.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines || exit 12
+  python scripts/baseline_wcp.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 12
 done
 step "compare"
 python scripts/eval_ladder.py --runs "$R/seqxgpt/*" "$R/provseg/*" "$R/baselines/*" \

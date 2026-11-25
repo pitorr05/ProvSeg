@@ -12,8 +12,11 @@ step "SeqXGPT x3 seeds";    STEPS="feats train eval" bash run_seqxgpt.sh || exit
 step "ProvSeg x3 seeds";    STEPS="feats S1 S2 S2b S4 eval" bash run_provseg.sh || exit 11
 step "baselines x3 seeds";  bash run_baselines.sh || exit 12
 for ds in ${SETS//,/ }; do
-  python scripts/baseline_markov.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines || exit 13
-  python scripts/baseline_wcp.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines || exit 14
+  python scripts/baseline_markov.py --ds $ds --score fdg --t 10 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score bino --t 10 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score fdg --t 0 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_markov.py --ds $ds --score bino --t 0 --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 11
+  python scripts/baseline_wcp.py --ds $ds --data ../data/processed --feats $FD --out $R/baselines $LIMARG || exit 14
 done
 step "compare + significance"
 python scripts/eval_ladder.py --runs "$R/seqxgpt/*" "$R/provseg/*" "$R/baselines/*" \
