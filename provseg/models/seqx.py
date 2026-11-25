@@ -194,7 +194,7 @@ def shapley_weights(K: int):
 
 
 @torch.no_grad()
-def channel_shapley(model: SeqXNet, x, mask, ctx=None, pos: int = 1, n_classes: int = 2):
+def channel_shapley(model: SeqXNet, x, mask, ctx=None, pos: int = 1, n_classes: int = 2, return_loo: bool = False):
     """Exact Shapley values of the K evidence groups for the per-word margin
     log P(AI) - log P(human). Returns (phi (B, L, K), m_full (B, L), m_empty (B, L));
     efficiency holds exactly: phi.sum(-1) == m_full - m_empty."""
@@ -212,4 +212,7 @@ def channel_shapley(model: SeqXNet, x, mask, ctx=None, pos: int = 1, n_classes: 
             if bits[k] == 0:
                 with_k = bits[:k] + (1,) + bits[k + 1:]
                 phi[..., k] += w[s] * (val[with_k] - v)
+    if return_loo:   # margin with evidence group k removed (all others kept): offline deletion tests
+        loo = torch.stack([val[tuple(0 if j == k else 1 for j in range(K))] for k in range(K)], -1)
+        return phi, val[(1,) * K], val[(0,) * K], loo
     return phi, val[(1,) * K], val[(0,) * K]

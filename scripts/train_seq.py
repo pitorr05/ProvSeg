@@ -300,15 +300,18 @@ def dump_shapley(model, a, recs, fs, tok, dev, names, path):
                                               batch["word_index"].to(dev), W), a.win)
         hum = a.classes.index("human")
         with amp(a, dev):
-            phi, mf, me = channel_shapley(model, x, mask, ctx, pos=1 - hum, n_classes=2)
-        phi, mf, me = phi[:, :W].cpu().numpy(), mf[:, :W].cpu().numpy(), me[:, :W].cpu().numpy()
+            phi, mf, me, loo = channel_shapley(model, x, mask, ctx, pos=1 - hum, n_classes=2, return_loo=True)
+        phi, mf, me = phi[:, :W].float().cpu().numpy(), mf[:, :W].float().cpu().numpy(), me[:, :W].float().cpu().numpy()
+        loo = loo[:, :W].float().cpu().numpy()
         for k in range(len(phi)):
             r = recs[int(batch["rec_idx"][k])]
             s, n = int(batch["start"][k]), int(batch["word_mask"][k].sum())
             d = out.setdefault(r["meta"]["uid"], {"phi": np.zeros((len(r["words"]), phi.shape[-1]), np.float32),
                                                   "m_full": np.zeros(len(r["words"]), np.float32),
-                                                  "m_empty": np.zeros(len(r["words"]), np.float32)})
+                                                  "m_empty": np.zeros(len(r["words"]), np.float32),
+                                                  "m_loo": np.zeros((len(r["words"]), phi.shape[-1]), np.float32)})
             d["phi"][s:s + n], d["m_full"][s:s + n], d["m_empty"][s:s + n] = phi[k, :n], mf[k, :n], me[k, :n]
+            d["m_loo"][s:s + n] = loo[k, :n]
     pickle.dump(out, open(path, "wb"))
 
 
@@ -333,6 +336,7 @@ def main():
     ap.add_argument("--bnd_pos_weight", type=float, default=5.0)
     ap.add_argument("--multiclass", action="store_true", help="SeqXGPT-Bench 6-way protocol")
     ap.add_argument("--shapley", action="store_true")
+    ap.add_argument("--force", action="store_true", help="retrain even if this run already finished")
     ap.add_argument("--shap_cap", type=int, default=1000)
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--bs", type=int, default=32)
@@ -348,6 +352,11 @@ def main():
     ap.add_argument("--dev_cap", type=int, default=2500)
     a = ap.parse_args()
     a.eval = a.eval or a.train
+    rd0 = os.path.join(a.out, a.name)
+    if not a.force and os.path.exists(os.path.join(rd0, "meta.json")) and all(
+            os.path.exists(os.path.join(rd0, f"pred_{ds}.pkl")) for ds in a.eval.split(",")):
+        print(f"[{a.name}] already done (use --force to retrain) -> skip")
+        return
     seed_all(a.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.backends.cuda.matmul.allow_tf32 = True

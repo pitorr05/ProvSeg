@@ -88,6 +88,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dev_cap", type=int, default=2500)
     a = ap.parse_args()
+    if os.path.exists(os.path.join(a.out, a.name or f"{a.method}_{a.ds}", f"pred_{a.ds}.pkl")):
+        print(f"[{a.method}_{a.ds}] already done -> skip")
+        return
     path = os.path.join(a.data, f"{a.ds}.jsonl")
     sc = Scorer(a.observer, a.performer)
 

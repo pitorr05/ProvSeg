@@ -27,8 +27,8 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from provseg.conformal.selective import SelectiveCalibrator  # noqa: E402
 from provseg.data.torch_data import load_records  # noqa: E402
-from provseg.eval.metrics import (boundary_mae, sentence_metrics, word_auroc,  # noqa: E402
-                                  word_metrics)
+from provseg.eval.metrics import (boundary_mae, sentence_metrics, span_f1, window_diff,  # noqa: E402
+                                  word_auroc, word_metrics)
 
 ORDER = ["S0", "S1", "S2", "S2b", "S4", "baseline"]
 PRETTY = {
@@ -88,6 +88,8 @@ def main():
             row = {"dataset": ds, "step": meta.get("step") or "baseline", "method": label(meta), "run": meta["name"],
                    "n_docs": len(test), "F1w": wm["macro_f1"], "AUROC": word_auroc(g, pr),
                    "F1s": sentence_metrics([recs[u]["words"] for u in test], g, p)["sent_f1"]}
+            row["SpanF1"] = span_f1(g, p)
+            row["WinDiff"] = window_diff(g, p)
             if ds == "semeval8c":
                 row["MAE"] = boundary_mae(g, p)
             cal = [u for u, v in d.items() if v["split"] == "cal" and u in recs]
@@ -110,11 +112,11 @@ def main():
     lines = ["# ProvSeg ladder (test split; same documents for every row of a benchmark)", ""]
     for ds, g in df.groupby("dataset", sort=False):
         sel_cols = [c for al in alphas for c in (f"Cov@{al:g}", f"Risk@{al:g}")]
-        cols = [c for c in ["F1w", "AUROC", "F1s", "MAE"] + sel_cols if c in g and g[c].notna().any()]
+        cols = [c for c in ["F1w", "AUROC", "F1s", "SpanF1", "WinDiff", "MAE"] + sel_cols if c in g and g[c].notna().any()]
         lines += [f"## {ds}  (n={int(g['n_docs'].iloc[0])} docs)", "",
                   "| method | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
         for _, r in g.iterrows():
-            vals = [("%.2f" % r[c]) if c == "MAE" else ("%.1f" % (100 * r[c])) if pd.notna(r[c]) else "-" for c in cols]
+            vals = [("%.2f" % r[c]) if c in ("MAE", "WinDiff") else ("%.1f" % (100 * r[c])) if pd.notna(r[c]) else "-" for c in cols]
             lines.append(f"| {r['method']} | " + " | ".join(vals) + " |")
         lines.append("")
     lines += [f"Cov@a: % words answered with certified error <= a (prob >= 1-{a.delta}); Risk@a: realised error on "

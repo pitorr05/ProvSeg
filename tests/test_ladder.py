@@ -148,3 +148,23 @@ def test_bonferroni_calibrator_certifies_partial_coverage():
     ans = out != 2
     assert 0.05 < ans.mean() < 1.0
     assert (out[ans] != g[ans]).mean() <= 0.1
+
+
+def test_shapley_leave_one_out():
+    torch.manual_seed(1)
+    m = SeqXNet(ID2, seq_len=8, n_channels=2).eval()
+    x, mask = torch.randn(1, 8, 2), torch.ones(1, 8, dtype=torch.bool)
+    phi, mf, me, loo = channel_shapley(m, x, mask, return_loo=True)
+    keep = torch.tensor([[0.0, 1.0]])
+    assert torch.allclose(loo[..., 0], class_margin(m(x, mask, None, keep)), atol=1e-5)
+
+
+def test_window_diff_and_bootstrap_counts():
+    from provseg.eval.metrics import window_diff
+    from scripts.significance import doc_counts, macro_f1_from_counts
+    g = [np.array([0] * 10 + [1] * 10)]
+    assert window_diff(g, g) == 0.0
+    assert window_diff(g, [np.array([0] * 5 + [1] * 15)]) > 0
+    p = np.array([0] * 12 + [1] * 8)
+    from sklearn.metrics import f1_score
+    assert abs(macro_f1_from_counts(doc_counts(g[0], p)) - f1_score(g[0], p, average="macro")) < 1e-9

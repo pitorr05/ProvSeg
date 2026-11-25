@@ -183,3 +183,27 @@ def sentence_metrics(words_list, golds, preds) -> dict:
     g_all, p_all = np.array(g_all), np.array(p_all)
     return {"sent_acc": float((g_all == p_all).mean()),
             "sent_f1": float(f1_score(g_all, p_all, average="macro", labels=sorted(set(g_all.tolist()))))}
+
+
+def window_diff(golds, preds, k=None) -> float:
+    """WindowDiff (Pevzner & Hearst, 2002) on word labels, averaged over documents (lower is better).
+    A boundary is a position where the label changes. k defaults to half the mean gold segment length
+    of each document (the convention of the 2026 change-point segmentation work)."""
+    vals = []
+    for g, p in zip(golds, preds):
+        g, p = np.asarray(g), np.asarray(p)
+        m = g >= 0
+        g, p = g[m], np.where(p[m] == 2, -1, p[m])
+        n = len(g)
+        if n < 3:
+            continue
+        bg = np.r_[0, (g[1:] != g[:-1]).astype(int)]
+        bp = np.r_[0, (p[1:] != p[:-1]).astype(int)]
+        kk = k or max(2, int(round(n / (bg.sum() + 1) / 2)))
+        if kk >= n:
+            continue
+        cg, cp = np.cumsum(bg), np.cumsum(bp)
+        dg = cg[kk:] - cg[:-kk]
+        dp = cp[kk:] - cp[:-kk]
+        vals.append(float((dg != dp).mean()))
+    return float(np.mean(vals)) if vals else float("nan")

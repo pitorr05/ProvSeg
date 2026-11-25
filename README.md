@@ -1,4 +1,4 @@
-> Cách làm paper và kế hoạch ICLR 2028: xem `SKILL_ICLR.md`; prompt điều phối và bản đồ SOTA 2025–2026: `PROMPT_ICLR.md`.
+> Cách làm paper và kế hoạch ICLR 2028: xem `SKILL_ICLR.md`; prompt điều phối và bản đồ SOTA 2025–2026: `PROMPT_ICLR.md`; các phiên bản nâng dần (nhánh git, prompt, chạy treo): `versions/README.md`.
 
 # ProvSeg: phát hiện từng từ do Người hay AI viết, đi lên từ SeqXGPT (EMNLP 2023)
 
