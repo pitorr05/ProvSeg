@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from provseg.data.loaders import apt_eval, beemo, editlens, pasted, semeval8c, seqxgpt  # noqa: E402
+from provseg.data.loaders import apt_eval, beemo, coauthor, editlens, pasted, semeval8c, seqxgpt  # noqa: E402
 from provseg.data.schema import write_jsonl  # noqa: E402
 
 LOADERS = {
@@ -21,6 +21,7 @@ LOADERS = {
     "beemo": (beemo.load, "hf"),
     "apt_eval": (apt_eval.load, "hf"),
     "editlens": (editlens.load, "refs"),
+    "coauthor": (coauthor.load, "hf"),
 }
 
 

@@ -192,3 +192,14 @@ def test_markov_layer_smooths_isolated_flips():
     x = torch.stack([1 - s, s], -1)
     q = m.calibrated(x, adjacency(11, 0), torch.ones(1, 11))
     assert q[0, 5] > 0.5 > 0.2                                  # neighbours pull it back to "machine"
+
+
+def test_coauthor_replay_authorship():
+    from provseg.data.loaders.coauthor import replay
+    ev = [{"eventName": "system-initialize", "eventSource": "api", "currentDoc": "Prompt. "},
+          {"eventName": "text-insert", "eventSource": "user", "textDelta": {"ops": [{"retain": 8}, {"insert": "I ran"}]}},
+          {"eventName": "text-insert", "eventSource": "api", "textDelta": {"ops": [{"retain": 13}, {"insert": " far away."}]}},
+          {"eventName": "text-delete", "eventSource": "user", "textDelta": {"ops": [{"retain": 13}, {"delete": 4}]}}]
+    text, auth = replay(ev)
+    assert text == "Prompt. I ran away."
+    assert auth[:13] == [0] * 13 and auth[13:] == [1] * len(" away.")

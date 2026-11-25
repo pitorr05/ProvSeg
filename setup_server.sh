@@ -27,6 +27,12 @@ for z in ("classification", "eval-OOD"):
     zipfile.ZipFile(f"{p}/{z}.zip").extractall(f"{p}/x/{z}")
 if full:
     snapshot_download("smksaha/apt-eval", repo_type="dataset", local_dir=f"{hf}/smksaha__apt-eval")
+import urllib.request
+cz = f"{hf}/coauthor/coauthor.zip"
+if not os.path.exists(f"{hf}/coauthor/x/coauthor-v1.0"):
+    os.makedirs(f"{hf}/coauthor", exist_ok=True)
+    urllib.request.urlretrieve("https://cs.stanford.edu/~minalee/zip/chi2022-coauthor-v1.0.zip", cz)
+    zipfile.ZipFile(cz).extractall(f"{hf}/coauthor/x")
 print("datasets ok")
 PY
 
