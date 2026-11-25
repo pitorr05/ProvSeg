@@ -30,15 +30,16 @@ from provseg.eval.metrics import word_auroc  # noqa: E402
 
 def check_run(d, data, auroc_check=True):
     issues = []
-    if not os.path.exists(os.path.join(d, "meta.json")):
-        issues.append("missing meta.json")
     preds = glob.glob(os.path.join(d, "pred_*.pkl"))
     if not preds:
         return issues + ["no pred_*.pkl"]
     for p in preds:
         ds = os.path.basename(p)[5:-4]
         dump = pickle.load(open(p, "rb"))
-        meta = dump.pop("__meta__")
+        meta = dump.pop("__meta__", None)
+        if meta is None:
+            issues.append(f"{ds}: prediction dump has no __meta__")
+            continue
         probs = np.concatenate([v["prob"][:, 1] for v in dump.values()])
         if not np.isfinite(probs).all():
             issues.append(f"{ds}: non-finite probabilities")
