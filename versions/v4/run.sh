@@ -6,6 +6,12 @@ need scripts/baseline_wcp.py "v3/T2"
 need provseg/data/loaders/coauthor.py T1
 export SEEDS="13 21 42"
 export SETS=${SETS:-seqxgpt,semeval8c,beemo,pasted,coauthor}
+step "download CoAuthor if needed"
+[ -d ../data/hf/coauthor/x/coauthor-v1.0 ] || python -c "
+import os, urllib.request, zipfile
+os.makedirs('../data/hf/coauthor', exist_ok=True)
+urllib.request.urlretrieve('https://cs.stanford.edu/~minalee/zip/chi2022-coauthor-v1.0.zip', '../data/hf/coauthor/coauthor.zip')
+zipfile.ZipFile('../data/hf/coauthor/coauthor.zip').extractall('../data/hf/coauthor/x')" || exit 8
 step "build new benchmarks"
 python scripts/build_data.py --hf ../data/hf --refs ../refs --out ../data/processed --only pasted,coauthor || exit 9
 step "SeqXGPT x3 seeds";    STEPS="feats train eval" bash run_seqxgpt.sh || exit 10
